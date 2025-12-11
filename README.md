@@ -30,6 +30,8 @@ python server.py  # 默认 0.0.0.0:8000
 - `GET /api/config`  -> 下载目录、日志目录、cookie 文件与更新时间
 - `GET /api/logs/missing-3mf` -> 缺失 3MF 记录列表
 - `POST /api/logs/missing-3mf/redownload` -> 读取缺失记录，使用最新 Cookie 重新获取下载地址并补下 3MF
+- `POST /api/instances/{inst_id}/redownload` -> 指定实例 ID，扫描已下载模型，重新获取原始下载地址并覆盖本地文件
+- `POST /api/models/{model_id}/redownload` -> 指定模型 ID（目录 MW_{id}_*），遍历该模型的全部实例 apiUrl 重新下载
 - `GET /api/gallery` -> 扫描下载目录下 `MW_*/meta.json`，返回模型简表
 
 ## 前端

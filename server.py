@@ -206,6 +206,169 @@ def retry_missing_downloads(cfg, cookie: str):
     return {"processed": len(lines), "success": success_cnt, "failed": failed_cnt, "details": details}
 
 
+def redownload_instance_by_id(cfg, cookie: str, inst_id: int):
+    """
+    按实例 ID 扫描已下载模型，重新获取下载地址并覆盖保存到 instances 目录。
+    """
+    session = requests.Session()
+    session.headers.update({"User-Agent": "Mozilla/5.0 (MW-Redownload-One)"})
+    session.cookies.update(parse_cookies(cookie))
+
+    root = Path(cfg["download_dir"])
+    found = 0
+    success = 0
+    details = []
+
+    for meta_path in root.glob("MW_*/meta.json"):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        instances = meta.get("instances") or []
+        target = next((i for i in instances if str(i.get("id")) == str(inst_id)), None)
+        if not target:
+            continue
+        found += 1
+        api_url = target.get("apiUrl") or f"https://makerworld.com.cn/api/v1/design-service/instance/{inst_id}/f3mf?type=download&fileType="
+        try:
+            name3mf, dl_url = fetch_instance_3mf(session, inst_id, cookie, api_url)
+        except Exception as e:
+            details.append({"status": "fail", "base_name": meta.get("baseName"), "inst_id": inst_id, "message": f"接口失败: {e}"})
+            continue
+
+        if not dl_url:
+            details.append({"status": "fail", "base_name": meta.get("baseName"), "inst_id": inst_id, "message": "未返回下载地址"})
+            continue
+
+        base_dir = meta_path.parent
+        inst_dir = base_dir / "instances"
+        inst_dir.mkdir(parents=True, exist_ok=True)
+        file_name = pick_instance_filename(target, name3mf or target.get("name") or "")
+        dest = inst_dir / file_name
+        if dest.exists():
+            try:
+                dest.unlink()
+            except Exception:
+                pass
+        try:
+            download_file(session, dl_url, dest)
+        except Exception as e:
+            details.append({"status": "fail", "base_name": meta.get("baseName"), "inst_id": inst_id, "message": f"下载失败: {e}"})
+            continue
+
+        target["downloadUrl"] = dl_url
+        if name3mf:
+            target["name"] = name3mf
+        try:
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as e:
+            details.append({"status": "fail", "base_name": meta.get("baseName"), "inst_id": inst_id, "message": f"写入 meta.json 失败: {e}"})
+            continue
+
+        # 同步移除缺失日志里的该实例
+        missing_log = Path(cfg["logs_dir"]) / "missing_3mf.log"
+        if missing_log.exists():
+            filtered = []
+            for line in missing_log.read_text(encoding="utf-8").splitlines():
+                parts = line.split("\t")
+                if len(parts) >= 3 and parts[2] == str(inst_id):
+                    continue
+                filtered.append(line)
+            missing_log.write_text("\n".join(filtered), encoding="utf-8")
+
+        success += 1
+        details.append({"status": "ok", "base_name": meta.get("baseName"), "inst_id": inst_id, "file": dest.name, "downloadUrl": dl_url})
+
+    return {"found": found, "success": success, "failed": max(found - success, 0), "details": details}
+
+
+def redownload_model_by_id(cfg, cookie: str, model_id: int):
+    """
+    按模型 ID (目录名 MW_{id}_*) 扫描，针对其中所有 instances 的 apiUrl 重新下载并更新 meta。
+    """
+    session = requests.Session()
+    session.headers.update({"User-Agent": "Mozilla/5.0 (MW-Redownload-Model)"})
+    session.cookies.update(parse_cookies(cookie))
+
+    root = Path(cfg["download_dir"])
+    targets = list(root.glob(f"MW_{model_id}_*/meta.json"))
+    if not targets:
+        return {"processed": 0, "success": 0, "failed": 0, "details": []}
+
+    details = []
+    success = 0
+    processed = 0
+    missing_log = Path(cfg["logs_dir"]) / "missing_3mf.log"
+    missing_lines = missing_log.read_text(encoding="utf-8").splitlines() if missing_log.exists() else []
+
+    for meta_path in targets:
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            details.append({"status": "fail", "base_name": meta_path.parent.name, "message": f"读取 meta 失败: {e}"})
+            continue
+
+        instances = meta.get("instances") or []
+        base_dir = meta_path.parent
+        inst_dir = base_dir / "instances"
+        inst_dir.mkdir(parents=True, exist_ok=True)
+
+        for inst in instances:
+            processed += 1
+            inst_id = inst.get("id")
+            api_url = inst.get("apiUrl") or f"https://makerworld.com.cn/api/v1/design-service/instance/{inst_id}/f3mf?type=download&fileType="
+            try:
+                inst_id_int = int(inst_id) if inst_id is not None else inst_id
+            except Exception:
+                inst_id_int = inst_id
+            try:
+                name3mf, dl_url = fetch_instance_3mf(session, inst_id_int, cookie, api_url)
+            except Exception as e:
+                details.append({"status": "fail", "base_name": meta.get("baseName"), "inst_id": inst_id, "message": f"接口失败: {e}"})
+                continue
+
+            if not dl_url:
+                details.append({"status": "fail", "base_name": meta.get("baseName"), "inst_id": inst_id, "message": "未返回下载地址"})
+                continue
+
+            file_name = pick_instance_filename(inst, name3mf or inst.get("name") or "")
+            dest = inst_dir / file_name
+            if dest.exists():
+                try:
+                    dest.unlink()
+                except Exception:
+                    pass
+            try:
+                download_file(session, dl_url, dest)
+            except Exception as e:
+                details.append({"status": "fail", "base_name": meta.get("baseName"), "inst_id": inst_id, "message": f"下载失败: {e}"})
+                continue
+
+            inst["downloadUrl"] = dl_url
+            if name3mf:
+                inst["name"] = name3mf
+            success += 1
+            details.append({"status": "ok", "base_name": meta.get("baseName"), "inst_id": inst_id, "file": dest.name, "downloadUrl": dl_url})
+
+            # 清理缺失记录中对应实例
+            if missing_lines:
+                missing_lines = [
+                    ln for ln in missing_lines
+                    if not (len(ln.split("\t")) >= 3 and ln.split("\t")[2] == str(inst_id))
+                ]
+
+        try:
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as e:
+            details.append({"status": "fail", "base_name": meta.get("baseName"), "message": f"写入 meta.json 失败: {e}"})
+
+    if missing_log is not None:
+        missing_log.write_text("\n".join(missing_lines), encoding="utf-8")
+
+    failed = max(processed - success, 0)
+    return {"processed": processed, "success": success, "failed": failed, "details": details}
+
+
 def scan_gallery(cfg) -> List[dict]:
     root = Path(cfg["download_dir"])
     items = []
@@ -318,6 +481,40 @@ async def api_redownload_missing():
     except Exception as e:
         logger.exception("缺失 3MF 重试下载失败")
         raise HTTPException(500, f"重试下载失败: {e}")
+
+
+@app.post("/api/instances/{inst_id}/redownload")
+async def api_redownload_instance(inst_id: int):
+    cookie = read_cookie(CFG)
+    if not cookie:
+        raise HTTPException(400, "请先设置 cookie")
+    try:
+        result = redownload_instance_by_id(CFG, cookie, inst_id)
+        if result.get("found", 0) == 0:
+            raise HTTPException(404, "未找到该实例")
+        return {"status": "ok", **result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("实例重下失败")
+        raise HTTPException(500, f"重下失败: {e}")
+
+
+@app.post("/api/models/{model_id}/redownload")
+async def api_redownload_model(model_id: int):
+    cookie = read_cookie(CFG)
+    if not cookie:
+        raise HTTPException(400, "请先设置 cookie")
+    try:
+        result = redownload_model_by_id(CFG, cookie, model_id)
+        if result.get("processed", 0) == 0:
+            raise HTTPException(404, "未找到该模型或 meta")
+        return {"status": "ok", **result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("模型重下失败")
+        raise HTTPException(500, f"重下失败: {e}")
 
 
 @app.delete("/api/logs/missing-3mf/{index:int}")
