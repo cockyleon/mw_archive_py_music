@@ -21,7 +21,7 @@
   <div class="search">
     <div class="search-row">
       <input type="text" id="kw" placeholder="搜索标题或标签..." />
-      <button class="clear-btn" type="button" id="clearBtn">清空</button>
+      <button class="clear-btn" type="button" id="clearBtn">清</button>
     </div>
     <div class="filters">
       <span class="filters__label">分类</span>
@@ -31,9 +31,28 @@
       <span class="filters__label">作者</span>
       <div id="authorChips" class="filters__chips"></div>
     </div>
+    <div class="filters">
+      <span class="filters__label">筛选</span>
+      <div class="filters__chips">
+        <button class="filter-chip" type="button" id="favOnlyBtn" aria-pressed="false">只看收藏</button>
+        <button class="filter-chip" type="button" id="printedOnlyBtn" aria-pressed="false">只看已打印</button>
+      </div>
+    </div>
   </div>
   <div id="grid" class="grid" role="list"></div>
   <div id="pagination" class="pagination" aria-label="分页"></div>
+
+  <div id="filterModal" class="filter-modal" style="display:none;" aria-hidden="true">
+    <div class="filter-modal__inner" role="dialog" aria-modal="true" aria-labelledby="filterModalTitle">
+      <div class="filter-modal__header">
+        <div id="filterModalTitle" class="filter-modal__title">全部分类</div>
+        <button class="filter-modal__close" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="filter-modal__body">
+        <div id="filterModalChips" class="filter-modal__chips"></div>
+      </div>
+    </div>
+  </div>
 
   <!-- Lightbox / modal for image preview -->
   <div id="lightbox" class="lightbox" style="display:none;" aria-hidden="true">

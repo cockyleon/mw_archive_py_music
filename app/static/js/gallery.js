@@ -1,10 +1,14 @@
 let models = [];
 let activeTag = "";
 let activeAuthor = "";
+let onlyFavorites = false;
+let onlyPrinted = false;
 let currentPage = 1;
 let pageSize = 12; // 每页显示数量
 let currentLightboxList = [];
 let currentLightboxIndex = 0;
+const filterChipLimit = 12;
+const authorChipLimit = 10;
 const statBlueprint = [
   { key: "likes", icon: "👍", label: "点赞" },
   { key: "favorites", icon: "⭐", label: "收藏" },
@@ -17,6 +21,11 @@ const filterChips = document.getElementById("filterChips");
 const authorChips = document.getElementById("authorChips");
 const clearBtn = document.getElementById("clearBtn");
 const paginationWrap = document.getElementById("pagination");
+const favOnlyBtn = document.getElementById("favOnlyBtn");
+const printedOnlyBtn = document.getElementById("printedOnlyBtn");
+const filterModal = document.getElementById("filterModal");
+const filterModalTitle = document.getElementById("filterModalTitle");
+const filterModalChips = document.getElementById("filterModalChips");
 const lightbox = document.getElementById("lightbox");
 const lightboxImg = document.getElementById("lightbox-img");
 const lightboxCaption = document.getElementById("lightbox-caption");
@@ -80,6 +89,82 @@ function toNumber(value){
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function selectTag(tag){
+  activeTag = tag;
+  currentPage = 1;
+  renderFilters();
+  renderAuthorFilters();
+  render();
+}
+
+function selectAuthor(name){
+  activeAuthor = name;
+  currentPage = 1;
+  renderFilters();
+  renderAuthorFilters();
+  render();
+}
+
+function syncFlagFilterButtons(){
+  if(favOnlyBtn){
+    favOnlyBtn.classList.toggle("active", onlyFavorites);
+    favOnlyBtn.setAttribute("aria-pressed", onlyFavorites ? "true" : "false");
+  }
+  if(printedOnlyBtn){
+    printedOnlyBtn.classList.toggle("active", onlyPrinted);
+    printedOnlyBtn.setAttribute("aria-pressed", onlyPrinted ? "true" : "false");
+  }
+}
+
+function createFilterChip({ label, value, count, isActive, onSelect, extraClass }){
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "filter-chip" + (isActive ? " active" : "") + (extraClass ? ` ${extraClass}` : "");
+  btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+  btn.textContent = `${label}${typeof count === "number" ? ` (${count})` : ""}`;
+  btn.addEventListener("click", () => onSelect(value));
+  return btn;
+}
+
+function openFilterModal({ type, items, total }){
+  if(!filterModal || !filterModalChips || !filterModalTitle) return;
+  const isTag = type === "tag";
+  const activeValue = isTag ? activeTag : activeAuthor;
+  const allLabel = isTag ? "全部模型" : "全部作者";
+  const selectFn = isTag ? selectTag : selectAuthor;
+  filterModalTitle.textContent = isTag ? "全部分类" : "全部作者";
+  filterModalChips.innerHTML = "";
+
+  filterModalChips.appendChild(createFilterChip({
+    label: allLabel,
+    value: "",
+    count: total,
+    isActive: activeValue === "",
+    onSelect: (value) => { selectFn(value); closeFilterModal(); }
+  }));
+
+  items.forEach(([value, count]) => {
+    filterModalChips.appendChild(createFilterChip({
+      label: value,
+      value,
+      count,
+      isActive: activeValue === value,
+      onSelect: (val) => { selectFn(val); closeFilterModal(); }
+    }));
+  });
+
+  filterModal.style.display = "flex";
+  filterModal.setAttribute("aria-hidden", "false");
+  document.body.style.overflow = "hidden";
+}
+
+function closeFilterModal(){
+  if(!filterModal) return;
+  filterModal.style.display = "none";
+  filterModal.setAttribute("aria-hidden", "true");
+  document.body.style.overflow = "";
+}
+
 function toggleFavorite(m){
   const key = getModelKey(m);
   if(!key) return;
@@ -130,6 +215,7 @@ async function load(){
   }
   renderFilters();
   renderAuthorFilters();
+  syncFlagFilterButtons();
   updatePageSize();
   currentPage = 1;
   render();
@@ -142,25 +228,33 @@ function renderFilters(){
     counts[tag] = (counts[tag] || 0) + 1;
   }));
   filterChips.innerHTML = "";
-  const createChip = (label, tag, count) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "filter-chip" + (activeTag === tag ? " active" : "");
-    btn.setAttribute('aria-pressed', activeTag === tag ? 'true' : 'false');
-    btn.textContent = `${label}${typeof count === "number" ? ` (${count})` : ""}`;
-    btn.addEventListener("click", () => {
-      activeTag = tag;
-      currentPage = 1;
-      renderFilters();
-      renderAuthorFilters();
-      render();
+  const entries = Object.entries(counts)
+    .sort((a,b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  filterChips.appendChild(createFilterChip({
+    label: "全部模型",
+    value: "",
+    count: models.length || 0,
+    isActive: activeTag === "",
+    onSelect: selectTag
+  }));
+  entries.slice(0, filterChipLimit)
+    .forEach(([tag, count]) => filterChips.appendChild(createFilterChip({
+      label: tag,
+      value: tag,
+      count,
+      isActive: activeTag === tag,
+      onSelect: selectTag
+    })));
+  if(entries.length > filterChipLimit){
+    const moreBtn = document.createElement("button");
+    moreBtn.type = "button";
+    moreBtn.className = "filter-chip filter-chip--ghost";
+    moreBtn.textContent = `更多 +${entries.length - filterChipLimit}`;
+    moreBtn.addEventListener("click", () => {
+      openFilterModal({ type: "tag", items: entries, total: models.length || 0 });
     });
-    return btn;
-  };
-  filterChips.appendChild(createChip("全部模型", "", models.length || 0));
-  Object.entries(counts)
-    .sort((a,b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .forEach(([tag, count]) => filterChips.appendChild(createChip(tag, tag, count)));
+    filterChips.appendChild(moreBtn);
+  }
 }
 
 function renderAuthorFilters(){
@@ -171,25 +265,33 @@ function renderAuthorFilters(){
     counts[name] = (counts[name] || 0) + 1;
   });
   authorChips.innerHTML = "";
-  const createChip = (label, name, count) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "filter-chip" + (activeAuthor === name ? " active" : "");
-    btn.setAttribute('aria-pressed', activeAuthor === name ? 'true' : 'false');
-    btn.textContent = `${label}${typeof count === "number" ? ` (${count})` : ""}`;
-    btn.addEventListener("click", () => {
-      activeAuthor = name;
-      currentPage = 1;
-      renderFilters();
-      renderAuthorFilters();
-      render();
+  const entries = Object.entries(counts)
+    .sort((a,b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  authorChips.appendChild(createFilterChip({
+    label: "全部作者",
+    value: "",
+    count: models.length || 0,
+    isActive: activeAuthor === "",
+    onSelect: selectAuthor
+  }));
+  entries.slice(0, authorChipLimit)
+    .forEach(([name, count]) => authorChips.appendChild(createFilterChip({
+      label: name,
+      value: name,
+      count,
+      isActive: activeAuthor === name,
+      onSelect: selectAuthor
+    })));
+  if(entries.length > authorChipLimit){
+    const moreBtn = document.createElement("button");
+    moreBtn.type = "button";
+    moreBtn.className = "filter-chip filter-chip--ghost";
+    moreBtn.textContent = `更多 +${entries.length - authorChipLimit}`;
+    moreBtn.addEventListener("click", () => {
+      openFilterModal({ type: "author", items: entries, total: models.length || 0 });
     });
-    return btn;
-  };
-  authorChips.appendChild(createChip("全部作者", "", models.length || 0));
-  Object.entries(counts)
-    .sort((a,b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .forEach(([name, count]) => authorChips.appendChild(createChip(name, name, count)));
+    authorChips.appendChild(moreBtn);
+  }
 }
 
 function renderPagination(totalPages){
@@ -271,6 +373,12 @@ function render(){
   if(activeAuthor){
     list = list.filter(m => (m.author?.name || "未知作者") === activeAuthor);
   }
+  if(onlyFavorites){
+    list = list.filter(m => favoriteSet.has(getModelKey(m)));
+  }
+  if(onlyPrinted){
+    list = list.filter(m => printedSet.has(getModelKey(m)));
+  }
 
   const total = list.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -286,6 +394,8 @@ function render(){
     if(activeTag) tips.push(`标签「${activeTag}」`);
     if(keyword) tips.push(`关键词「${kwInput.value.trim()}」`);
     if(activeAuthor) tips.push(`作者「${activeAuthor}」`);
+    if(onlyFavorites) tips.push("收藏");
+    if(onlyPrinted) tips.push("已打印");
     empty.textContent = tips.length ? `未找到匹配 ${tips.join("、")}` : "暂无模型";
     empty.style.display = "block";
     paginationWrap.innerHTML = '';
@@ -421,17 +531,6 @@ function render(){
     });
     body.appendChild(statsWrap);
 
-    if(m.tags?.length){
-      const tagsRow = document.createElement("div");
-      tagsRow.className = "card-tags";
-      m.tags.forEach(tag => {
-        const chip = document.createElement("span");
-        chip.textContent = tag;
-        tagsRow.appendChild(chip);
-      });
-      body.appendChild(tagsRow);
-    }
-
     card.appendChild(body);
     grid.appendChild(card);
   });
@@ -451,6 +550,29 @@ if(clearBtn && kwInput){
     currentPage = 1;
     render();
   });
+}
+
+if(favOnlyBtn){
+  favOnlyBtn.addEventListener("click", () => {
+    onlyFavorites = !onlyFavorites;
+    currentPage = 1;
+    syncFlagFilterButtons();
+    render();
+  });
+}
+if(printedOnlyBtn){
+  printedOnlyBtn.addEventListener("click", () => {
+    onlyPrinted = !onlyPrinted;
+    currentPage = 1;
+    syncFlagFilterButtons();
+    render();
+  });
+}
+
+if(filterModal){
+  const closeBtn = filterModal.querySelector(".filter-modal__close");
+  if(closeBtn) closeBtn.addEventListener("click", closeFilterModal);
+  filterModal.addEventListener("click", (e) => { if(e.target === filterModal) closeFilterModal(); });
 }
 
 // lightbox controls
@@ -496,8 +618,13 @@ if(lightbox){
 
   // keyboard navigation
   window.addEventListener('keydown', (e) => {
-    if(lightbox.style.display !== 'none'){
-      if(e.key === 'Escape') closeLightbox();
+    const lightboxOpen = lightbox.style.display !== 'none';
+    const modalOpen = filterModal && filterModal.style.display !== 'none';
+    if(e.key === 'Escape'){
+      if(modalOpen){ closeFilterModal(); return; }
+      if(lightboxOpen) closeLightbox();
+    }
+    if(lightboxOpen){
       if(e.key === 'ArrowLeft') lightboxPrev();
       if(e.key === 'ArrowRight') lightboxNext();
     }

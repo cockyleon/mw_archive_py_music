@@ -102,6 +102,15 @@ input[type=text]:focus{
   border-color: transparent;
   box-shadow: 0 12px 25px rgba(37,99,235,0.22);
 }
+.filter-chip--ghost{
+  background:#f8fafc;
+  color:var(--muted);
+  border-style:dashed;
+}
+.filter-chip--ghost:hover{
+  color:#334155;
+  border-color:#cbd5e1;
+}
 
 .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap:16px; }
 .card{
@@ -235,6 +244,30 @@ input[type=text]:focus{
 /* Touch / zoom improvements for lightbox */
 .lightbox img{ transition: transform .18s ease; touch-action: none; -webkit-user-drag: none; }
 .lightbox img.zoomed{ transform: scale(1.12); cursor: grab; }
+
+/* Filter modal */
+.filter-modal{ position:fixed; left:0; top:0; right:0; bottom:0; background:rgba(15,23,42,0.55); display:flex; align-items:center; justify-content:center; z-index:1100; }
+.filter-modal__inner{
+  width:min(820px, 94vw);
+  max-height:82vh;
+  background:#fff;
+  border-radius:16px;
+  border:1px solid rgba(229,231,235,0.9);
+  box-shadow:0 18px 50px rgba(15,23,42,0.2);
+  display:flex;
+  flex-direction:column;
+}
+.filter-modal__header{ display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); }
+.filter-modal__title{ font-weight:700; font-size:15px; }
+.filter-modal__close{
+  border:1px solid var(--border);
+  background:#fff;
+  border-radius:8px;
+  padding:6px 10px;
+  cursor:pointer;
+}
+.filter-modal__body{ padding:14px 16px 18px; overflow:auto; }
+.filter-modal__chips{ display:flex; flex-wrap:wrap; gap:8px; }
 
 /* Pagination */
 .pagination{ display:flex; gap:8px; align-items:center; justify-content:center; margin:18px 0; }
