@@ -97,6 +97,14 @@ def pick_ext(filename: str, fallback: str) -> str:
     return suffix if suffix else fallback
 
 
+def is_image_upload(upload: UploadFile) -> bool:
+    content_type = (upload.content_type or "").lower()
+    if content_type.startswith("image/"):
+        return True
+    name = Path(upload.filename or "").name.lower()
+    return name.endswith((".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"))
+
+
 def parse_instance_descs(raw: str) -> List[str]:
     if not raw:
         return []
@@ -773,6 +781,48 @@ async def api_upload_attachment(model_dir: str, file: UploadFile = File(...)):
     except Exception as e:
         logger.exception("附件保存失败")
         raise HTTPException(500, f"附件保存失败: {e}")
+    return {"status": "ok", "file": dest.name}
+
+
+@app.get("/api/models/{model_dir}/printed")
+async def api_list_printed(model_dir: str):
+    target = resolve_model_dir(model_dir)
+    printed_dir = target / "printed"
+    if not printed_dir.exists():
+        return {"files": []}
+    files = sorted([p.name for p in printed_dir.iterdir() if p.is_file()])
+    return {"files": files}
+
+
+@app.post("/api/models/{model_dir}/printed")
+async def api_upload_printed(model_dir: str, file: UploadFile = File(...)):
+    if file is None or not file.filename:
+        raise HTTPException(400, "图片不能为空")
+    if not is_image_upload(file):
+        raise HTTPException(400, "仅支持图片文件")
+    target = resolve_model_dir(model_dir)
+    safe_name = sanitize_filename(Path(file.filename).name)
+    if not safe_name:
+        safe_name = f"printed{pick_ext(file.filename, '.jpg')}"
+    printed_dir = target / "printed"
+    printed_dir.mkdir(parents=True, exist_ok=True)
+    dest = printed_dir / safe_name
+    if dest.exists():
+        stem = dest.stem or "printed"
+        suffix = dest.suffix
+        idx = 1
+        while True:
+            candidate = printed_dir / f"{stem}_{idx}{suffix}"
+            if not candidate.exists():
+                dest = candidate
+                break
+            idx += 1
+    try:
+        with dest.open("wb") as f:
+            shutil.copyfileobj(file.file, f)
+    except Exception as e:
+        logger.exception("打印成品保存失败")
+        raise HTTPException(500, f"打印成品保存失败: {e}")
     return {"status": "ok", "file": dest.name}
 
 

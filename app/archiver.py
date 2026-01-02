@@ -541,6 +541,44 @@ h1.title {
   margin-bottom: 10px;
 }
 
+.printed {
+  margin-bottom: 10px;
+}
+
+.printed-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.printed-item {
+  width: 160px;
+}
+
+.printed-item img {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #eee;
+  background: #000;
+  cursor: zoom-in;
+}
+
+.printed-caption {
+  font-size: 12px;
+  color: #555;
+  margin-top: 4px;
+  word-break: break-all;
+}
+
+.printed-empty {
+  color: #888;
+  font-size: 13px;
+  margin-top: 6px;
+}
+
 .attach-upload {
   display: flex;
   flex-wrap: wrap;
@@ -1170,6 +1208,16 @@ def build_index_html(meta: dict, assets: dict) -> str:
     <ul class="attach-list" id="attachList"></ul>
   </div>
 
+  <div class="section-title">打印成品</div>
+  <div class="printed">
+    <div class="attach-upload">
+      <input type="file" id="printedInput" multiple accept="image/*">
+      <button class="attach-btn" type="button" id="printedUploadBtn">上传图片</button>
+      <span class="attach-msg" id="printedMsg"></span>
+    </div>
+    <div class="printed-grid" id="printedList"></div>
+  </div>
+
 </div>
 
 <div class="lightbox" id="imgLightbox">
@@ -1219,11 +1267,12 @@ def build_index_html(meta: dict, assets: dict) -> str:
   const overlay = document.getElementById('imgLightbox');
   const overlayImg = overlay ? overlay.querySelector('img') : null;
   if (!overlay || !overlayImg) return;
-  document.querySelectorAll('.zoomable').forEach((img) => {{
-    img.addEventListener('click', () => {{
-      overlayImg.src = img.src;
-      overlay.classList.add('show');
-    }});
+  document.addEventListener('click', (event) => {{
+    const target = event.target;
+    if (!(target instanceof HTMLImageElement)) return;
+    if (!target.classList.contains('zoomable')) return;
+    overlayImg.src = target.src;
+    overlay.classList.add('show');
   }});
   overlay.addEventListener('click', () => {{
     overlay.classList.remove('show');
@@ -1355,6 +1404,119 @@ def build_index_html(meta: dict, assets: dict) -> str:
       fd.append('file', file);
       try {{
         const res = await fetch('/api/models/' + encodeURIComponent(modelDir) + '/attachments', {{
+          method: 'POST',
+          body: fd,
+        }});
+        if (!res.ok) throw new Error('upload failed');
+        success += 1;
+      }} catch (e) {{
+        failed += 1;
+      }}
+      setMsg(`上传中... (${{success + failed}}/${{files.length}})`);
+    }}
+    inputEl.value = '';
+    loadList();
+    if (failed === 0) setMsg('上传成功');
+    else if (success === 0) setMsg('上传失败', true);
+    else setMsg(`部分成功 ${{success}}/${{files.length}}`, true);
+    btnEl.disabled = false;
+  }});
+}})();
+
+(function() {{
+  const listEl = document.getElementById('printedList');
+  const msgEl = document.getElementById('printedMsg');
+  const inputEl = document.getElementById('printedInput');
+  const btnEl = document.getElementById('printedUploadBtn');
+  if (!listEl) return;
+
+  function setMsg(text, isError) {{
+    if (!msgEl) return;
+    msgEl.textContent = text || '';
+    if (isError) msgEl.classList.add('error');
+    else msgEl.classList.remove('error');
+  }}
+
+  function getModelDir() {{
+    const path = window.location.pathname || '';
+    const parts = path.split('/').filter(Boolean);
+    const filesIdx = parts.indexOf('files');
+    if (filesIdx >= 0 && parts.length > filesIdx + 1) return decodeURIComponent(parts[filesIdx + 1]);
+    if (parts.length >= 2) return decodeURIComponent(parts[parts.length - 2]);
+    return '';
+  }}
+
+  const modelDir = getModelDir();
+  if (!modelDir) {{
+    setMsg('无法识别模型目录', true);
+    return;
+  }}
+
+  function renderList(files) {{
+    listEl.innerHTML = '';
+    if (!files || files.length === 0) {{
+      const empty = document.createElement('div');
+      empty.className = 'printed-empty';
+      empty.textContent = '暂无图片';
+      listEl.appendChild(empty);
+      return;
+    }}
+    files.forEach((name) => {{
+      const item = document.createElement('div');
+      item.className = 'printed-item';
+      const img = document.createElement('img');
+      img.className = 'zoomable';
+      img.src = './printed/' + encodeURIComponent(name);
+      img.alt = name;
+      const caption = document.createElement('div');
+      caption.className = 'printed-caption';
+      caption.textContent = name;
+      item.appendChild(img);
+      item.appendChild(caption);
+      listEl.appendChild(item);
+    }});
+  }}
+
+  function loadList() {{
+    if (location.protocol === 'file:') {{
+      renderList([]);
+      setMsg('请通过本地服务打开页面以查看图片列表', true);
+      return;
+    }}
+    fetch('/api/models/' + encodeURIComponent(modelDir) + '/printed')
+      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+      .then((data) => {{
+        renderList((data && data.files) || []);
+        setMsg('');
+      }})
+      .catch(() => {{
+        renderList([]);
+        setMsg('图片列表加载失败', true);
+      }});
+  }}
+
+  loadList();
+
+  if (!btnEl || !inputEl) return;
+  btnEl.addEventListener('click', async () => {{
+    const files = inputEl.files ? Array.from(inputEl.files) : [];
+    if (!files.length) {{
+      setMsg('请选择图片', true);
+      return;
+    }}
+    if (location.protocol === 'file:') {{
+      setMsg('请通过本地服务打开页面以便上传', true);
+      return;
+    }}
+    btnEl.disabled = true;
+    let success = 0;
+    let failed = 0;
+    setMsg(`上传中... (0/${{files.length}})`);
+    for (const file of files) {{
+      const fd = new FormData();
+      fd.append('file', file);
+      try {{
+        const res = await fetch('/api/models/' + encodeURIComponent(modelDir) + '/printed', {{
           method: 'POST',
           body: fd,
         }});
