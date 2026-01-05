@@ -5,7 +5,7 @@ let activeSource = "";
 let onlyFavorites = false;
 let onlyPrinted = false;
 let currentPage = 1;
-let pageSize = 12; // 每页显示数量
+let pageSize = 20; // 每页显示数量
 let currentLightboxList = [];
 let currentLightboxIndex = 0;
 const filterChipLimit = 12;
@@ -23,6 +23,9 @@ const authorChips = document.getElementById("authorChips");
 const sourceMenu = document.getElementById("sourceMenu");
 const clearBtn = document.getElementById("clearBtn");
 const paginationWrap = document.getElementById("pagination");
+const pageSizeInput = document.getElementById("pageSizeInput");
+const totalCountEl = document.getElementById("totalCount");
+const sortOrderSelect = document.getElementById("sortOrder");
 const favOnlyBtn = document.getElementById("favOnlyBtn");
 const printedOnlyBtn = document.getElementById("printedOnlyBtn");
 const filterModal = document.getElementById("filterModal");
@@ -67,17 +70,11 @@ async function saveFlags(){
   }
 }
 
-function updatePageSize(){
-  const w = window.innerWidth || document.documentElement.clientWidth;
-  const prev = pageSize;
-  pageSize = w < 600 ? 8 : 12;
-  return prev !== pageSize;
+function clampPageSize(value){
+  const parsed = Number(value);
+  if(!Number.isFinite(parsed)) return pageSize;
+  return Math.min(100, Math.max(1, Math.floor(parsed)));
 }
-
-window.addEventListener('resize', () => {
-  const changed = updatePageSize();
-  if(changed){ currentPage = 1; render(); }
-});
 
 function formatDate(value){
   if(!value) return "";
@@ -105,6 +102,28 @@ function selectAuthor(name){
   renderFilters();
   renderAuthorFilters();
   render();
+}
+
+function sortModelsDesc(list){
+  const sortMode = sortOrderSelect?.value || "collected";
+  return list.slice().sort((a, b) => {
+    const aPrimary = sortMode === "published" ? a?.publishedAt : a?.collectedAt;
+    const bPrimary = sortMode === "published" ? b?.publishedAt : b?.collectedAt;
+    const aFallback = sortMode === "published" ? a?.collectedAt : a?.publishedAt;
+    const bFallback = sortMode === "published" ? b?.collectedAt : b?.publishedAt;
+    const aTime = Date.parse(aPrimary || aFallback || "");
+    const bTime = Date.parse(bPrimary || bFallback || "");
+    const aValid = Number.isFinite(aTime);
+    const bValid = Number.isFinite(bTime);
+    if(aValid || bValid){
+      if(!aValid) return 1;
+      if(!bValid) return -1;
+      if(aTime !== bTime) return bTime - aTime;
+    }
+    const aName = (a?.title || a?.baseName || "").toLowerCase();
+    const bName = (b?.title || b?.baseName || "").toLowerCase();
+    return bName.localeCompare(aName);
+  });
 }
 
 function getSourceValue(m){
@@ -237,7 +256,10 @@ async function load(){
   renderAuthorFilters();
   renderSourceMenu();
   syncFlagFilterButtons();
-  updatePageSize();
+  if(pageSizeInput){
+    pageSize = clampPageSize(pageSizeInput.value);
+    pageSizeInput.value = String(pageSize);
+  }
   currentPage = 1;
   render();
 }
@@ -348,7 +370,6 @@ function renderSourceMenu(){
 function renderPagination(totalPages){
   if(!paginationWrap) return;
   paginationWrap.innerHTML = "";
-  if(totalPages <= 1) return;
   const prev = document.createElement('button');
   prev.className = 'small';
   prev.textContent = '上一页';
@@ -359,13 +380,21 @@ function renderPagination(totalPages){
 
   const start = Math.max(1, currentPage - 2);
   const end = Math.min(totalPages, currentPage + 2);
-  for(let i = start; i <= end; i++){
-    const btn = document.createElement('button');
-    btn.textContent = String(i);
-    if(i === currentPage){ btn.className = 'active'; btn.setAttribute('aria-current','page'); }
-    btn.addEventListener('click', () => { currentPage = i; render(); });
-    paginationWrap.appendChild(btn);
+  if(totalPages > 1){
+    for(let i = start; i <= end; i++){
+      const btn = document.createElement('button');
+      btn.textContent = String(i);
+      if(i === currentPage){ btn.className = 'active'; btn.setAttribute('aria-current','page'); }
+      btn.addEventListener('click', () => { currentPage = i; render(); });
+      paginationWrap.appendChild(btn);
+    }
   }
+
+  const info = document.createElement('span');
+  info.className = 'page-info';
+  const totalText = totalCountEl ? totalCountEl.textContent : "0";
+  info.textContent = `共 ${totalText} 条 / 第 ${currentPage}/${totalPages} 页`;
+  paginationWrap.appendChild(info);
 
   const next = document.createElement('button');
   next.className = 'small';
@@ -434,7 +463,9 @@ function render(){
     list = list.filter(m => printedSet.has(getModelKey(m)));
   }
 
+  list = sortModelsDesc(list);
   const total = list.length;
+  if(totalCountEl) totalCountEl.textContent = String(total);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   if(currentPage > totalPages) currentPage = totalPages;
 
@@ -453,7 +484,7 @@ function render(){
     if(onlyPrinted) tips.push("已打印");
     empty.textContent = tips.length ? `未找到匹配 ${tips.join("、")}` : "暂无模型";
     empty.style.display = "block";
-    paginationWrap.innerHTML = '';
+    renderPagination(totalPages);
     return;
   }
   empty.style.display = "none";
@@ -602,6 +633,22 @@ if(kwInput){
 if(clearBtn && kwInput){
   clearBtn.addEventListener("click", () => {
     kwInput.value = "";
+    currentPage = 1;
+    render();
+  });
+}
+
+if(pageSizeInput){
+  pageSizeInput.addEventListener("input", () => {
+    pageSize = clampPageSize(pageSizeInput.value);
+    pageSizeInput.value = String(pageSize);
+    currentPage = 1;
+    render();
+  });
+}
+
+if(sortOrderSelect){
+  sortOrderSelect.addEventListener("change", () => {
     currentPage = 1;
     render();
   });

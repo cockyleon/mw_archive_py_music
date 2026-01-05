@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <title>本地模型库</title>
-  <link rel="icon" href="/files/imgs/fav.ico">
+  <link rel="icon" href="/static/imgs/fav.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/static/imgs/fav.png">
   <link rel="stylesheet" href="/static/css/gallery.css">
   <link rel="stylesheet" href="/static/css/manual_import.css">
   <noscript>
@@ -51,8 +52,26 @@
           </div>
         </div>
       </div>
+      <div class="toolbar">
+        <div class="toolbar-count">共 <span id="totalCount">0</span> 个模型</div>
+        <label class="sort-order">
+          排序
+          <select id="sortOrder">
+            <option value="collected" selected>采集时间倒序</option>
+            <option value="published">发布时间倒序</option>
+          </select>
+        </label>
+      </div>
       <div id="grid" class="grid" role="list"></div>
-      <div id="pagination" class="pagination" aria-label="分页"></div>
+      <div class="pagination-bar">
+        <div class="pagination-controls">  
+        </div>
+          <label class="page-size">
+            每页
+            <input type="number" id="pageSizeInput" min="1" max="100" value="20">
+          </label>
+        <div id="pagination" class="pagination" aria-label="分页"></div>
+      </div>
       <div id="empty" class="muted" style="display:none;">暂无模型</div>
     </main>
   </div>
