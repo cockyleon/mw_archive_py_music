@@ -1,164 +1,191 @@
 <!DOCTYPE html>
 <html lang="zh">
+
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>本地模型库</title>
   <link rel="icon" href="/static/imgs/fav.ico" sizes="any">
   <link rel="icon" type="image/png" href="/static/imgs/fav.png">
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <!-- CSS Files -->
+  <link rel="stylesheet" href="/static/css/variables.css">
+  <link rel="stylesheet" href="/static/css/reset.css">
+  <link rel="stylesheet" href="/static/css/components.css">
   <link rel="stylesheet" href="/static/css/gallery.css">
   <link rel="stylesheet" href="/static/css/manual_import.css">
-  <noscript>
-    <link rel="stylesheet" href="/static/css/gallery.css">
-  </noscript>
 </head>
+
 <body>
-<div class="wrap">
-  <header>
-    <div class="brand">
-      <h1>本地模型库</h1>
-      <div class="sub">搜索 / 标签 / 作者筛选，点击卡片打开本地详情页</div>
-    </div>
-    <div class="header-actions">
-      <button class="btn btn-secondary" type="button" data-manual-import-open>手动导入</button>
-      <a class="btn" href="/config">配置 / 归档</a>
-    </div>
-  </header>
-  <div class="layout">
-    <aside class="sidebar">
-      <div class="side-card">
-        <div class="side-title">来源</div>
-        <div id="sourceMenu" class="side-menu"></div>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <h1><i class="fas fa-cube"></i> 本地模型库</h1>
       </div>
-    </aside>
-    <main class="content">
-      <div class="search">
-        <div class="search-row">
-          <input type="text" id="kw" placeholder="搜索标题或标签..." />
-          <button class="clear-btn" type="button" id="clearBtn">清</button>
+
+      <!-- Header Search with Reset -->
+      <div class="header-search">
+        <div class="search-box">
+          <i class="fas fa-search search-box__icon"></i>
+          <input type="text" id="kw" class="search-box__input" placeholder="搜索模型名称或标签..." autocomplete="off" />
+          <button class="search-box__clear" type="button" id="clearBtn" aria-label="清除搜索">
+            <i class="fas fa-times"></i>
+          </button>
         </div>
-        <div class="filters">
-          <span class="filters__label">分类</span>
-          <div id="filterChips" class="filters__chips"></div>
+        <button id="resetSearchBtn" class="btn-ghost" title="重置所有条件" style="margin-left:8px;">
+          <i class="fas fa-undo"></i> 重置
+        </button>
+      </div>
+
+      <div class="header-actions">
+        <button class="btn btn-secondary" type="button" data-manual-import-open>
+          <i class="fas fa-upload"></i> 手动导入
+        </button>
+        <a class="btn btn-primary" href="/config">
+          <i class="fas fa-cog"></i> 配置
+        </a>
+      </div>
+    </header>
+
+    <div class="layout">
+      <!-- Vertical Sidebar -->
+      <aside class="sidebar">
+        <!-- Source Group -->
+        <div class="side-title source-title"><i class="fas fa-globe"></i> 来源</div>
+        <div id="sourceMenu" class="side-menu">
+          <!-- JS will populate -->
         </div>
-        <div class="filters">
-          <span class="filters__label">作者</span>
-          <div id="authorChips" class="filters__chips"></div>
+
+        <!-- Filter Group -->
+        <div class="side-title filter-title"><i class="fas fa-filter"></i> 筛选</div>
+        <div class="side-menu">
+          <button class="side-item" type="button" id="favOnlyBtn">
+            <span><i class="far fa-heart"></i> 只看收藏</span>
+          </button>
+          <button class="side-item" type="button" id="printedOnlyBtn">
+            <span><i class="far fa-check-circle"></i> 只看已打印</span>
+          </button>
         </div>
-        <div class="filters">
-          <span class="filters__label">筛选</span>
-          <div class="filters__chips">
-            <button class="filter-chip" type="button" id="favOnlyBtn" aria-pressed="false">只看收藏</button>
-            <button class="filter-chip" type="button" id="printedOnlyBtn" aria-pressed="false">只看已打印</button>
+
+        <!-- Tags Group -->
+        <div class="side-title tag-title"><i class="fas fa-tags"></i> 分类</div>
+        <div id="filterChips" class="side-menu tag-list">
+          <!-- JS will populate vertical items -->
+        </div>
+
+        <!-- Authors Group -->
+        <div class="side-title author-title"><i class="fas fa-user"></i> 作者</div>
+        <div id="authorChips" class="side-menu">
+          <!-- JS will populate vertical items -->
+        </div>
+      </aside>
+
+      <!-- Main Content -->
+      <main class="content">
+        <!-- Toolbar -->
+        <div class="toolbar">
+          <div class="toolbar-count">共 <span id="totalCount">0</span> 个模型</div>
+          <div class="sort-order">
+            <label>排序</label>
+            <select id="sortOrder">
+              <option value="collected" selected>采集时间倒序</option>
+              <option value="published">发布时间倒序</option>
+            </select>
           </div>
         </div>
-      </div>
-      <div class="toolbar">
-        <div class="toolbar-count">共 <span id="totalCount">0</span> 个模型</div>
-        <label class="sort-order">
-          排序
-          <select id="sortOrder">
-            <option value="collected" selected>采集时间倒序</option>
-            <option value="published">发布时间倒序</option>
-          </select>
-        </label>
-      </div>
-      <div id="grid" class="grid" role="list"></div>
-      <div class="pagination-bar">
-        <div class="pagination-controls">  
-        </div>
-          <label class="page-size">
-            每页
-            <input type="number" id="pageSizeInput" min="1" max="100" value="20">
-          </label>
-        <div id="pagination" class="pagination" aria-label="分页"></div>
-      </div>
-      <div id="empty" class="muted" style="display:none;">暂无模型</div>
-    </main>
-  </div>
 
-  <div id="filterModal" class="filter-modal" style="display:none;" aria-hidden="true">
-    <div class="filter-modal__inner" role="dialog" aria-modal="true" aria-labelledby="filterModalTitle">
-      <div class="filter-modal__header">
-        <div id="filterModalTitle" class="filter-modal__title">全部分类</div>
-        <button class="filter-modal__close" type="button" aria-label="关闭">×</button>
-      </div>
-      <div class="filter-modal__body">
-        <div id="filterModalChips" class="filter-modal__chips"></div>
+        <!-- Grid -->
+        <div id="grid" class="grid" role="list"></div>
+
+        <div id="empty" class="muted" style="display:none;">暂无模型数据</div>
+      </main>
+    </div>
+
+    <div id="filterModal" class="filter-modal" style="display:none;" aria-hidden="true">
+      <div class="filter-modal__inner" role="dialog" aria-modal="true" aria-labelledby="filterModalTitle">
+        <div class="filter-modal__header">
+          <div id="filterModalTitle" class="filter-modal__title">全部分类</div>
+          <button class="filter-modal__close" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="filter-modal__body">
+          <div id="filterModalChips" class="filter-modal__chips"></div>
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- Lightbox / modal for image preview -->
-  <div id="lightbox" class="lightbox" style="display:none;" aria-hidden="true">
-    <div class="lightbox-inner" role="dialog" aria-modal="true">
-      <button class="lightbox-close" aria-label="关闭">✖</button>
-      <button class="lightbox-prev" aria-label="上一张">◀</button>
-      <img id="lightbox-img" alt="预览图片">
-      <div id="lightbox-caption" class="lightbox-caption"></div>
-      <button class="lightbox-next" aria-label="下一张">▶</button>
+    <!-- Lightbox / modal for image preview -->
+    <div id="lightbox" class="lightbox" style="display:none;" aria-hidden="true">
+      <div class="lightbox-inner" role="dialog" aria-modal="true">
+        <button class="lightbox-close" aria-label="关闭">✖</button>
+        <button class="lightbox-prev" aria-label="上一张">◀</button>
+        <img id="lightbox-img" alt="预览图片">
+        <div id="lightbox-caption" class="lightbox-caption"></div>
+        <button class="lightbox-next" aria-label="下一张">▶</button>
+      </div>
+    </div>
+
+  </div>
+  <div id="manualImportModal" class="manual-modal" aria-hidden="true">
+    <div class="manual-modal__inner" role="dialog" aria-modal="true" aria-labelledby="manualImportTitle">
+      <div class="manual-modal__header">
+        <div id="manualImportTitle" class="manual-modal__title">手动导入模型</div>
+        <button class="manual-modal__close" type="button" data-manual-import-close>×</button>
+      </div>
+      <form id="manualImportForm" class="manual-form">
+        <div class="manual-grid">
+          <div>
+            <label>模型名称</label>
+            <input type="text" name="title" required>
+          </div>
+          <div>
+            <label>模型地址</label>
+            <input type="text" name="modelLink" placeholder="https://example.com/model">
+          </div>
+          <div>
+            <label>模型来源</label>
+            <input type="text" name="sourceLink" placeholder="https://example.com">
+          </div>
+        </div>
+        <div class="manual-row">
+          <label>模型介绍</label>
+          <textarea name="summary" rows="4" placeholder="填写模型介绍..."></textarea>
+        </div>
+        <div class="manual-row">
+          <label>标签 (空格分隔)</label>
+          <input type="text" name="tags" placeholder="配件 打印支架 原创">
+        </div>
+        <div class="manual-row">
+          <label>封面图片</label>
+          <input type="file" name="cover" accept="image/*">
+        </div>
+        <div class="manual-row">
+          <label>设计图片 (多选)</label>
+          <input type="file" name="design_images" accept="image/*" multiple>
+        </div>
+        <div class="manual-row">
+          <label>实例文件</label>
+          <div class="manual-inline">
+            <button class="manual-btn" type="button" id="manualAddInstance">添加实例文件</button>
+            <span class="manual-help">可多次添加</span>
+          </div>
+          <input type="file" id="manualInstancePicker" accept=".3mf" multiple style="display:none">
+          <div id="instanceDescList" class="file-desc-list"></div>
+        </div>
+        <div class="manual-row">
+          <label>附件文件 (多选)</label>
+          <input type="file" name="attachments" multiple>
+        </div>
+        <div class="manual-actions">
+          <button class="manual-btn" type="button" data-manual-import-close>取消</button>
+          <button class="manual-btn primary" type="submit" id="manualImportSubmit">保存</button>
+        </div>
+        <div class="manual-msg" id="manualImportMsg"></div>
+      </form>
     </div>
   </div>
-
-</div>
-<div id="manualImportModal" class="manual-modal" aria-hidden="true">
-  <div class="manual-modal__inner" role="dialog" aria-modal="true" aria-labelledby="manualImportTitle">
-    <div class="manual-modal__header">
-      <div id="manualImportTitle" class="manual-modal__title">手动导入模型</div>
-      <button class="manual-modal__close" type="button" data-manual-import-close>×</button>
-    </div>
-    <form id="manualImportForm" class="manual-form">
-      <div class="manual-grid">
-        <div>
-          <label>模型名称</label>
-          <input type="text" name="title" required>
-        </div>
-        <div>
-          <label>模型地址</label>
-          <input type="text" name="modelLink" placeholder="https://example.com/model">
-        </div>
-        <div>
-          <label>模型来源</label>
-          <input type="text" name="sourceLink" placeholder="https://example.com">
-        </div>
-      </div>
-      <div class="manual-row">
-        <label>模型介绍</label>
-        <textarea name="summary" rows="4" placeholder="填写模型介绍..."></textarea>
-      </div>
-      <div class="manual-row">
-        <label>标签 (空格分隔)</label>
-        <input type="text" name="tags" placeholder="配件 打印支架 原创">
-      </div>
-      <div class="manual-row">
-        <label>封面图片</label>
-        <input type="file" name="cover" accept="image/*">
-      </div>
-      <div class="manual-row">
-        <label>设计图片 (多选)</label>
-        <input type="file" name="design_images" accept="image/*" multiple>
-      </div>
-      <div class="manual-row">
-        <label>实例文件</label>
-        <div class="manual-inline">
-          <button class="manual-btn" type="button" id="manualAddInstance">添加实例文件</button>
-          <span class="manual-help">可多次添加</span>
-        </div>
-        <input type="file" id="manualInstancePicker" accept=".3mf" multiple style="display:none">
-        <div id="instanceDescList" class="file-desc-list"></div>
-      </div>
-      <div class="manual-row">
-        <label>附件文件 (多选)</label>
-        <input type="file" name="attachments" multiple>
-      </div>
-      <div class="manual-actions">
-        <button class="manual-btn" type="button" data-manual-import-close>取消</button>
-        <button class="manual-btn primary" type="submit" id="manualImportSubmit">保存</button>
-      </div>
-      <div class="manual-msg" id="manualImportMsg"></div>
-    </form>
-  </div>
-</div>
-<script src="/static/js/gallery.js" defer></script>
-<script src="/static/js/manual_import.js" defer></script>
+  <script src="/static/js/gallery.js" defer></script>
+  <script src="/static/js/manual_import.js" defer></script>
 </body>
+
 </html>

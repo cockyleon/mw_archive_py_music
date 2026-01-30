@@ -4,8 +4,10 @@ let activeAuthor = "";
 let activeSource = "";
 let onlyFavorites = false;
 let onlyPrinted = false;
-let currentPage = 1;
-let pageSize = 20; // 每页显示数量
+let displayedCount = 20; // Initial display count
+let loadIncrement = 20; // Load 20 more each time
+let isTagsExpanded = false;
+let isAuthorsExpanded = false;
 let currentLightboxList = [];
 let currentLightboxIndex = 0;
 const filterChipLimit = 12;
@@ -37,14 +39,14 @@ const lightboxCaption = document.getElementById("lightbox-caption");
 let favoriteSet = new Set();
 let printedSet = new Set();
 
-function getModelKey(m){
+function getModelKey(m) {
   return String(m.dir || "");
 }
 
-async function loadFlags(){
-  try{
+async function loadFlags() {
+  try {
     const res = await fetch("/api/gallery/flags");
-    if(!res.ok) throw new Error("flags request failed");
+    if (!res.ok) throw new Error("flags request failed");
     const data = await res.json();
     favoriteSet = new Set(Array.isArray(data.favorites) ? data.favorites : []);
     printedSet = new Set(Array.isArray(data.printed) ? data.printed : []);
@@ -55,8 +57,8 @@ async function loadFlags(){
   }
 }
 
-async function saveFlags(){
-  try{
+async function saveFlags() {
+  try {
     await fetch("/api/gallery/flags", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -70,41 +72,41 @@ async function saveFlags(){
   }
 }
 
-function clampPageSize(value){
+function clampPageSize(value) {
   const parsed = Number(value);
-  if(!Number.isFinite(parsed)) return pageSize;
+  if (!Number.isFinite(parsed)) return pageSize;
   return Math.min(100, Math.max(1, Math.floor(parsed)));
 }
 
-function formatDate(value){
-  if(!value) return "";
+function formatDate(value) {
+  if (!value) return "";
   const parsed = new Date(value);
-  if(Number.isNaN(parsed.getTime())) return value;
+  if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleDateString("zh-CN");
 }
 
-function toNumber(value){
+function toNumber(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function selectTag(tag){
+function selectTag(tag) {
   activeTag = tag;
-  currentPage = 1;
+  displayedCount = loadIncrement;
   renderFilters();
   renderAuthorFilters();
   render();
 }
 
-function selectAuthor(name){
+function selectAuthor(name) {
   activeAuthor = name;
-  currentPage = 1;
+  displayedCount = loadIncrement;
   renderFilters();
   renderAuthorFilters();
   render();
 }
 
-function sortModelsDesc(list){
+function sortModelsDesc(list) {
   const sortMode = sortOrderSelect?.value || "collected";
   return list.slice().sort((a, b) => {
     const aPrimary = sortMode === "published" ? a?.publishedAt : a?.collectedAt;
@@ -115,10 +117,10 @@ function sortModelsDesc(list){
     const bTime = Date.parse(bPrimary || bFallback || "");
     const aValid = Number.isFinite(aTime);
     const bValid = Number.isFinite(bTime);
-    if(aValid || bValid){
-      if(!aValid) return 1;
-      if(!bValid) return -1;
-      if(aTime !== bTime) return bTime - aTime;
+    if (aValid || bValid) {
+      if (!aValid) return 1;
+      if (!bValid) return -1;
+      if (aTime !== bTime) return bTime - aTime;
     }
     const aName = (a?.title || a?.baseName || "").toLowerCase();
     const bName = (b?.title || b?.baseName || "").toLowerCase();
@@ -126,46 +128,50 @@ function sortModelsDesc(list){
   });
 }
 
-function getSourceValue(m){
-  if(m && m.source) return m.source;
+function getSourceValue(m) {
+  if (m && m.source) return m.source;
   const dir = m?.dir || "";
   return dir.startsWith("Others_") ? "others" : "makerworld";
 }
 
-function formatSourceLabel(value){
+function formatSourceLabel(value) {
   return value === "others" ? "Others" : "MakerWorld";
 }
 
-function selectSource(source){
+function selectSource(source) {
   activeSource = source;
-  currentPage = 1;
+  displayedCount = loadIncrement;
   renderSourceMenu();
   render();
 }
 
-function syncFlagFilterButtons(){
-  if(favOnlyBtn){
+function syncFlagFilterButtons() {
+  if (favOnlyBtn) {
     favOnlyBtn.classList.toggle("active", onlyFavorites);
     favOnlyBtn.setAttribute("aria-pressed", onlyFavorites ? "true" : "false");
   }
-  if(printedOnlyBtn){
+  if (printedOnlyBtn) {
     printedOnlyBtn.classList.toggle("active", onlyPrinted);
     printedOnlyBtn.setAttribute("aria-pressed", onlyPrinted ? "true" : "false");
   }
 }
 
-function createFilterChip({ label, value, count, isActive, onSelect, extraClass }){
+// Updated to create Sidebar Items
+function createFilterChip({ label, value, count, isActive, onSelect, extraClass }) {
   const btn = document.createElement("button");
   btn.type = "button";
-  btn.className = "filter-chip" + (isActive ? " active" : "") + (extraClass ? ` ${extraClass}` : "");
-  btn.setAttribute("aria-pressed", isActive ? "true" : "false");
-  btn.textContent = `${label}${typeof count === "number" ? ` (${count})` : ""}`;
+  // Use .side-item for sidebar styling
+  btn.className = "side-item" + (isActive ? " active" : "") + (extraClass ? ` ${extraClass}` : "");
+
+  // Format: "Label (Count)"
+  btn.innerHTML = `<span>${label}</span> <span style="font-size:12px; opacity:0.6;">${typeof count === "number" ? count : ""}</span>`;
+
   btn.addEventListener("click", () => onSelect(value));
   return btn;
 }
 
-function openFilterModal({ type, items, total }){
-  if(!filterModal || !filterModalChips || !filterModalTitle) return;
+function openFilterModal({ type, items, total }) {
+  if (!filterModal || !filterModalChips || !filterModalTitle) return;
   const isTag = type === "tag";
   const activeValue = isTag ? activeTag : activeAuthor;
   const allLabel = isTag ? "全部模型" : "全部作者";
@@ -196,42 +202,42 @@ function openFilterModal({ type, items, total }){
   document.body.style.overflow = "hidden";
 }
 
-function closeFilterModal(){
-  if(!filterModal) return;
+function closeFilterModal() {
+  if (!filterModal) return;
   filterModal.style.display = "none";
   filterModal.setAttribute("aria-hidden", "true");
   document.body.style.overflow = "";
 }
 
-function toggleFavorite(m){
+function toggleFavorite(m) {
   const key = getModelKey(m);
-  if(!key) return;
-  if(favoriteSet.has(key)){ favoriteSet.delete(key); } else { favoriteSet.add(key); }
+  if (!key) return;
+  if (favoriteSet.has(key)) { favoriteSet.delete(key); } else { favoriteSet.add(key); }
   saveFlags();
   render();
 }
 
-function togglePrinted(m){
+function togglePrinted(m) {
   const key = getModelKey(m);
-  if(!key) return;
-  if(printedSet.has(key)){ printedSet.delete(key); } else { printedSet.add(key); }
+  if (!key) return;
+  if (printedSet.has(key)) { printedSet.delete(key); } else { printedSet.add(key); }
   saveFlags();
   render();
 }
 
-function deleteModel(m){
+function deleteModel(m) {
   const key = getModelKey(m);
-  if(!key) return;
+  if (!key) return;
   const name = m.title || m.baseName || m.dir || "该模型";
-  if(!window.confirm(`确定物理删除「${name}」? 删除后无法恢复。`)) return;
+  if (!window.confirm(`确定物理删除「${name}」? 删除后无法恢复。`)) return;
   fetch(`/api/models/${encodeURIComponent(key)}/delete`, { method: "POST" })
     .then((res) => {
-      if(!res.ok) throw new Error("delete failed");
+      if (!res.ok) throw new Error("delete failed");
       models = models.filter(item => getModelKey(item) !== key);
       favoriteSet.delete(key);
       printedSet.delete(key);
       saveFlags();
-      currentPage = 1;
+      displayedCount = loadIncrement;
       renderFilters();
       renderAuthorFilters();
       renderSourceMenu();
@@ -243,8 +249,8 @@ function deleteModel(m){
     });
 }
 
-async function load(){
-  try{
+async function load() {
+  try {
     await loadFlags();
     const res = await fetch("/api/gallery");
     models = await res.json();
@@ -256,31 +262,24 @@ async function load(){
   renderAuthorFilters();
   renderSourceMenu();
   syncFlagFilterButtons();
-  if(pageSizeInput){
-    pageSize = clampPageSize(pageSizeInput.value);
-    pageSizeInput.value = String(pageSize);
-  }
-  currentPage = 1;
+  displayedCount = loadIncrement;
   render();
+  setupInfiniteScroll();
 }
 
-function renderFilters(){
-  if(!filterChips) return;
+function renderFilters() {
+  if (!filterChips) return;
   const counts = {};
   models.forEach(m => (m.tags || []).forEach(tag => {
     counts[tag] = (counts[tag] || 0) + 1;
   }));
   filterChips.innerHTML = "";
   const entries = Object.entries(counts)
-    .sort((a,b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  filterChips.appendChild(createFilterChip({
-    label: "全部模型",
-    value: "",
-    count: models.length || 0,
-    isActive: activeTag === "",
-    onSelect: selectTag
-  }));
-  entries.slice(0, filterChipLimit)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+
+  const displayLimit = isTagsExpanded ? entries.length : filterChipLimit;
+
+  entries.slice(0, displayLimit)
     .forEach(([tag, count]) => filterChips.appendChild(createFilterChip({
       label: tag,
       value: tag,
@@ -288,20 +287,24 @@ function renderFilters(){
       isActive: activeTag === tag,
       onSelect: selectTag
     })));
-  if(entries.length > filterChipLimit){
+
+  if (entries.length > filterChipLimit) {
     const moreBtn = document.createElement("button");
     moreBtn.type = "button";
-    moreBtn.className = "filter-chip filter-chip--ghost";
-    moreBtn.textContent = `更多 +${entries.length - filterChipLimit}`;
+    moreBtn.className = "side-item";
+    moreBtn.style.textAlign = "center";
+    moreBtn.style.color = "var(--color-primary)";
+    moreBtn.textContent = isTagsExpanded ? `收起标签` : `更多标签 (${entries.length - filterChipLimit})+`;
     moreBtn.addEventListener("click", () => {
-      openFilterModal({ type: "tag", items: entries, total: models.length || 0 });
+      isTagsExpanded = !isTagsExpanded;
+      renderFilters();
     });
     filterChips.appendChild(moreBtn);
   }
 }
 
-function renderAuthorFilters(){
-  if(!authorChips) return;
+function renderAuthorFilters() {
+  if (!authorChips) return;
   const counts = {};
   models.forEach(m => {
     const name = (m.author && m.author.name) ? m.author.name : "未知作者";
@@ -309,15 +312,11 @@ function renderAuthorFilters(){
   });
   authorChips.innerHTML = "";
   const entries = Object.entries(counts)
-    .sort((a,b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  authorChips.appendChild(createFilterChip({
-    label: "全部作者",
-    value: "",
-    count: models.length || 0,
-    isActive: activeAuthor === "",
-    onSelect: selectAuthor
-  }));
-  entries.slice(0, authorChipLimit)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+
+  const displayLimit = isAuthorsExpanded ? entries.length : authorChipLimit;
+
+  entries.slice(0, displayLimit)
     .forEach(([name, count]) => authorChips.appendChild(createFilterChip({
       label: name,
       value: name,
@@ -325,20 +324,24 @@ function renderAuthorFilters(){
       isActive: activeAuthor === name,
       onSelect: selectAuthor
     })));
-  if(entries.length > authorChipLimit){
+
+  if (entries.length > authorChipLimit) {
     const moreBtn = document.createElement("button");
     moreBtn.type = "button";
-    moreBtn.className = "filter-chip filter-chip--ghost";
-    moreBtn.textContent = `更多 +${entries.length - authorChipLimit}`;
+    moreBtn.className = "side-item";
+    moreBtn.style.textAlign = "center";
+    moreBtn.style.color = "var(--color-primary)";
+    moreBtn.textContent = isAuthorsExpanded ? `收起作者` : `更多作者 (${entries.length - authorChipLimit})+`;
     moreBtn.addEventListener("click", () => {
-      openFilterModal({ type: "author", items: entries, total: models.length || 0 });
+      isAuthorsExpanded = !isAuthorsExpanded;
+      renderAuthorFilters();
     });
     authorChips.appendChild(moreBtn);
   }
 }
 
-function renderSourceMenu(){
-  if(!sourceMenu) return;
+function renderSourceMenu() {
+  if (!sourceMenu) return;
   const counts = {};
   models.forEach(m => {
     const key = getSourceValue(m);
@@ -351,62 +354,67 @@ function renderSourceMenu(){
 
   const allBtn = document.createElement("button");
   allBtn.type = "button";
+  // Sidebar style
   allBtn.className = "side-item" + (activeSource === "" ? " active" : "");
-  allBtn.textContent = `全部 (${total})`;
+  allBtn.innerHTML = `<span>全部</span> <span style="font-size:12px;opacity:0.6;">${total}</span>`;
   allBtn.addEventListener("click", () => selectSource(""));
   sourceMenu.appendChild(allBtn);
 
   order.forEach((key) => {
-    if(!(key in counts)) return;
+    if (!(key in counts)) return;
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "side-item" + (activeSource === key ? " active" : "");
-    btn.textContent = `${labels[key]} (${counts[key] || 0})`;
+    btn.innerHTML = `<span>${labels[key]}</span> <span style="font-size:12px;opacity:0.6;">${counts[key] || 0}</span>`;
     btn.addEventListener("click", () => selectSource(key));
     sourceMenu.appendChild(btn);
   });
 }
 
-function renderPagination(totalPages){
-  if(!paginationWrap) return;
-  paginationWrap.innerHTML = "";
-  const prev = document.createElement('button');
-  prev.className = 'small';
-  prev.textContent = '上一页';
-  prev.setAttribute('aria-label','上一页');
-  prev.disabled = currentPage <= 1;
-  prev.addEventListener('click', () => { currentPage = Math.max(1, currentPage - 1); render(); });
-  paginationWrap.appendChild(prev);
+function updateLoadMoreIndicator(hasMore) {
+  const grid = document.getElementById("grid");
+  if (!grid) return;
 
-  const start = Math.max(1, currentPage - 2);
-  const end = Math.min(totalPages, currentPage + 2);
-  if(totalPages > 1){
-    for(let i = start; i <= end; i++){
-      const btn = document.createElement('button');
-      btn.textContent = String(i);
-      if(i === currentPage){ btn.className = 'active'; btn.setAttribute('aria-current','page'); }
-      btn.addEventListener('click', () => { currentPage = i; render(); });
-      paginationWrap.appendChild(btn);
+  let indicator = document.getElementById("loadMoreIndicator");
+  if (hasMore) {
+    if (!indicator) {
+      indicator = document.createElement("div");
+      indicator.id = "loadMoreIndicator";
+      indicator.className = "load-more-indicator";
+      indicator.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 加载更多...';
+      grid.parentElement.appendChild(indicator);
     }
+    indicator.style.display = "block";
+  } else {
+    if (indicator) indicator.style.display = "none";
   }
-
-  const info = document.createElement('span');
-  info.className = 'page-info';
-  const totalText = totalCountEl ? totalCountEl.textContent : "0";
-  info.textContent = `共 ${totalText} 条 / 第 ${currentPage}/${totalPages} 页`;
-  paginationWrap.appendChild(info);
-
-  const next = document.createElement('button');
-  next.className = 'small';
-  next.textContent = '下一页';
-  next.setAttribute('aria-label','下一页');
-  next.disabled = currentPage >= totalPages;
-  next.addEventListener('click', () => { currentPage = Math.min(totalPages, currentPage + 1); render(); });
-  paginationWrap.appendChild(next);
 }
 
-function openLightbox(list, index){
-  if(!list || !list.length) return;
+function setupInfiniteScroll() {
+  const content = document.querySelector('.content');
+  if (!content) return;
+
+  let isLoading = false;
+
+  content.addEventListener('scroll', () => {
+    if (isLoading) return;
+
+    const scrollTop = content.scrollTop;
+    const scrollHeight = content.scrollHeight;
+    const clientHeight = content.clientHeight;
+
+    // Load more when scrolled to 80% of content
+    if (scrollTop + clientHeight >= scrollHeight * 0.8) {
+      isLoading = true;
+      displayedCount += loadIncrement;
+      render(true);
+      setTimeout(() => { isLoading = false; }, 300);
+    }
+  });
+}
+
+function openLightbox(list, index) {
+  if (!list || !list.length) return;
   currentLightboxList = list;
   currentLightboxIndex = index;
   const m = list[index];
@@ -419,316 +427,314 @@ function openLightbox(list, index){
   lightbox.setAttribute('aria-hidden', 'false');
   document.body.style.overflow = 'hidden';
   const closeBtn = lightbox.querySelector('.lightbox-close');
-  if(closeBtn) closeBtn.focus();
+  if (closeBtn) closeBtn.focus();
 }
-function closeLightbox(){
+function closeLightbox() {
   lightbox.style.display = 'none';
   lightbox.setAttribute('aria-hidden', 'true');
   lightboxImg.src = '';
   document.body.style.overflow = '';
 }
-function lightboxPrev(){
-  if(currentLightboxIndex > 0){ currentLightboxIndex--; openLightbox(currentLightboxList, currentLightboxIndex); }
+function lightboxPrev() {
+  if (currentLightboxIndex > 0) { currentLightboxIndex--; openLightbox(currentLightboxList, currentLightboxIndex); }
 }
-function lightboxNext(){
-  if(currentLightboxIndex < currentLightboxList.length - 1){ currentLightboxIndex++; openLightbox(currentLightboxList, currentLightboxIndex); }
+function lightboxNext() {
+  if (currentLightboxIndex < currentLightboxList.length - 1) { currentLightboxIndex++; openLightbox(currentLightboxList, currentLightboxIndex); }
 }
 
-function render(){
+function render(append = false) {
   const grid = document.getElementById("grid");
   const empty = document.getElementById("empty");
-  if(!grid) return;
+  if (!grid) return;
   const keyword = (kwInput?.value || "").trim().toLowerCase();
   let list = models;
-  if(keyword){
+  if (keyword) {
     list = list.filter(m => {
       const title = (m.title || m.baseName || "").toLowerCase();
       const tags = (m.tags || []).map(t => t.toLowerCase());
       return title.includes(keyword) || tags.some(t => t.includes(keyword));
     });
   }
-  if(activeTag){
+  if (activeTag) {
     list = list.filter(m => (m.tags || []).includes(activeTag));
   }
-  if(activeAuthor){
+  if (activeAuthor) {
     list = list.filter(m => (m.author?.name || "未知作者") === activeAuthor);
   }
-  if(activeSource){
+  if (activeSource) {
     list = list.filter(m => getSourceValue(m) === activeSource);
   }
-  if(onlyFavorites){
+  if (onlyFavorites) {
     list = list.filter(m => favoriteSet.has(getModelKey(m)));
   }
-  if(onlyPrinted){
+  if (onlyPrinted) {
     list = list.filter(m => printedSet.has(getModelKey(m)));
   }
 
   list = sortModelsDesc(list);
   const total = list.length;
-  if(totalCountEl) totalCountEl.textContent = String(total);
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  if(currentPage > totalPages) currentPage = totalPages;
+  if (totalCountEl) totalCountEl.textContent = String(total);
 
-  // slice for pagination
-  const start = (currentPage - 1) * pageSize;
-  const pagedList = list.slice(start, start + pageSize);
+  // Infinite scroll: slice based on displayedCount
+  const displayList = list.slice(0, displayedCount);
 
-  grid.innerHTML = "";
-  if(!pagedList.length){
+  if (!append) grid.innerHTML = "";
+
+  if (!displayList.length) {
     const tips = [];
-    if(activeTag) tips.push(`标签「${activeTag}」`);
-    if(keyword) tips.push(`关键词「${kwInput.value.trim()}」`);
-    if(activeAuthor) tips.push(`作者「${activeAuthor}」`);
-    if(activeSource) tips.push(`来源「${formatSourceLabel(activeSource)}」`);
-    if(onlyFavorites) tips.push("收藏");
-    if(onlyPrinted) tips.push("已打印");
+    if (activeTag) tips.push(`标签「${activeTag}」`);
+    if (keyword) tips.push(`关键词「${kwInput.value.trim()}」`);
+    if (activeAuthor) tips.push(`作者「${activeAuthor}」`);
+    if (activeSource) tips.push(`来源「${formatSourceLabel(activeSource)}」`);
+    if (onlyFavorites) tips.push("收藏");
+    if (onlyPrinted) tips.push("已打印");
     empty.textContent = tips.length ? `未找到匹配 ${tips.join("、")}` : "暂无模型";
     empty.style.display = "block";
-    renderPagination(totalPages);
     return;
   }
   empty.style.display = "none";
 
-  pagedList.forEach((m, idx) => {
+  const startIdx = append ? grid.children.length : 0;
+
+  displayList.slice(startIdx).forEach((m, idx) => {
     const modelKey = getModelKey(m);
     const isFavorite = modelKey && favoriteSet.has(modelKey);
     const isPrinted = modelKey && printedSet.has(modelKey);
+
     const card = document.createElement("article");
     card.className = "card";
     card.setAttribute('role', 'listitem');
     card.tabIndex = 0;
-    card.onclick = () => window.open(`/files/${m.dir}/index.html`, `_blank`);
-    card.addEventListener('keydown', (e) => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); window.open(`/files/${m.dir}/index.html`, `_blank`); } });
+
+    // Cover Area (Clean, No Overlay)
+    const coverWrap = document.createElement("div");
+    coverWrap.className = "card-cover";
+    coverWrap.onclick = () => window.open(`/files/${m.dir}/index.html`, `_blank`);
 
     const cover = document.createElement("img");
     const coverName = m.cover || "design_01.png";
     cover.src = `/files/${m.dir}/images/${coverName}`;
     cover.loading = 'lazy';
     cover.alt = m.title || m.baseName || "模型封面";
-    // click on image opens lightbox (prevent propagation to card)
-    cover.addEventListener('click', (e) => { e.stopPropagation(); openLightbox(pagedList, idx); });
-    card.appendChild(cover);
+    cover.onerror = () => { cover.src = '/static/imgs/no-image.png'; };
+    coverWrap.appendChild(cover);
 
-    const overlay = document.createElement('div');
-    overlay.className = 'img-overlay';
-    overlay.innerHTML = `<div class="overlay-content"><div class="overlay-title">${escapeHtml(m.title || m.baseName || '')}</div><button class="view-btn" aria-label="查看">查看</button></div>`;
-    overlay.querySelector('.view-btn').addEventListener('click', (e) => { e.stopPropagation(); openLightbox(pagedList, idx); });
-    card.appendChild(overlay);
-
+    // Card Body
     const body = document.createElement("div");
     body.className = "card-body";
-    const title = document.createElement("div");
+
+    // Title
+    const title = document.createElement("h3");
     title.className = "title";
+    title.title = m.title || m.baseName || "未知模型";
     title.textContent = m.title || m.baseName || "未知模型";
+    title.onclick = () => window.open(`/files/${m.dir}/index.html`, `_blank`);
     body.appendChild(title);
 
+    // Author Info
     const meta = document.createElement("div");
     meta.className = "card-meta";
+
     const authorWrap = document.createElement("div");
     authorWrap.className = "author";
-    if(m.author?.avatarRelPath){
+    if (m.author?.avatarRelPath) {
       const avatar = document.createElement("img");
       avatar.src = `/files/${m.dir}/${m.author.avatarRelPath}`;
-      avatar.alt = m.author?.name || "作者头像";
+      avatar.alt = m.author?.name || "User";
       authorWrap.appendChild(avatar);
+    } else {
+      const avatarPlaceholder = document.createElement("div");
+      avatarPlaceholder.className = "avatar-placeholder";
+      avatarPlaceholder.innerHTML = '<i class="fas fa-user"></i>';
+      authorWrap.appendChild(avatarPlaceholder);
     }
     const authorName = document.createElement("span");
-    authorName.textContent = m.author?.name || "未知作者";
+    authorName.className = "author-name";
+    authorName.textContent = m.author?.name || "Unknown";
     authorWrap.appendChild(authorName);
     meta.appendChild(authorWrap);
-
-    const countInfo = document.createElement("span");
-    countInfo.textContent = `${m.instanceCount || 0} 个打印配置`;
-    meta.appendChild(countInfo);
     body.appendChild(meta);
 
-    const badgeRow = document.createElement("div");
-    badgeRow.className = "badges";
-    let hasBadge = false;
-    if(isFavorite){
-      const badge = document.createElement("span");
-      badge.className = "badge-favorite";
-      badge.textContent = "已收藏";
-      badgeRow.appendChild(badge);
-      hasBadge = true;
-    }
-    if(isPrinted){
-      const badge = document.createElement("span");
-      badge.className = "badge-printed";
-      badge.textContent = "已打印";
-      badgeRow.appendChild(badge);
-      hasBadge = true;
-    }
-    if(m.instanceCount){
-      const badge = document.createElement("span");
-      badge.textContent = `打印配置 ${m.instanceCount}`;
-      badgeRow.appendChild(badge);
-      hasBadge = true;
-    }
-    if(m.publishedAt){
-      const badge = document.createElement("span");
-      badge.textContent = `发布时间 ${formatDate(m.publishedAt)}`;
-      badgeRow.appendChild(badge);
-      hasBadge = true;
-    }
-    if(m.collectedAt){
-      const badge = document.createElement("span");
-      badge.textContent = `采集日期 ${formatDate(m.collectedAt)}`;
-      badgeRow.appendChild(badge);
-      hasBadge = true;
-    }
-    if(hasBadge){
-      body.appendChild(badgeRow);
-    }
-
-    const actions = document.createElement("div");
-    actions.className = "card-actions";
-    const favBtn = document.createElement("button");
-    favBtn.type = "button";
-    favBtn.className = "action-btn" + (isFavorite ? " active" : "");
-    favBtn.textContent = isFavorite ? "已收藏" : "收藏";
-    favBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleFavorite(m); });
-    actions.appendChild(favBtn);
-
-    const printedBtn = document.createElement("button");
-    printedBtn.type = "button";
-    printedBtn.className = "action-btn" + (isPrinted ? " active" : "");
-    printedBtn.textContent = isPrinted ? "已打印" : "标记已打印";
-    printedBtn.addEventListener("click", (e) => { e.stopPropagation(); togglePrinted(m); });
-    actions.appendChild(printedBtn);
-
-    const deleteBtn = document.createElement("button");
-    deleteBtn.type = "button";
-    deleteBtn.className = "action-btn danger";
-    deleteBtn.textContent = "删除";
-    deleteBtn.addEventListener("click", (e) => { e.stopPropagation(); deleteModel(m); });
-    actions.appendChild(deleteBtn);
-    body.appendChild(actions);
-
+    // Stats Row (Icons Only)
     const statsWrap = document.createElement("div");
     statsWrap.className = "stats";
-    statBlueprint.forEach(stat => {
-      const value = toNumber(m.stats?.[stat.key]);
-      const chip = document.createElement("span");
-      chip.className = "stat-chip";
-      chip.title = stat.label;
-      chip.innerHTML = `<span class="stat-icon">${stat.icon}</span><strong>${value}</strong><span class="stat-label">${stat.label}</span>`;
-      statsWrap.appendChild(chip);
-    });
+
+    if (m.stats?.likes > 0) {
+      statsWrap.appendChild(createStatIcon("fas fa-thumbs-up", m.stats.likes, "点赞"));
+    }
+    if (m.stats?.favorites > 0) {
+      statsWrap.appendChild(createStatIcon("fas fa-star", m.stats.favorites, "收藏"));
+    }
+    if (m.stats?.prints > 0) {
+      statsWrap.appendChild(createStatIcon("fas fa-print", m.stats.prints, "打印"));
+    }
+    if (m.stats?.downloads > 0 || m.downloadCount > 0) {
+      statsWrap.appendChild(createStatIcon("fas fa-download", m.stats?.downloads || m.downloadCount, "下载"));
+    }
     body.appendChild(statsWrap);
 
+    // Bottom Actions Row (PERSISTENT & ALWAYS VISIBLE)
+    const actions = document.createElement("div");
+    actions.className = "card-actions";
+
+    // Favorite Button
+    const favBtn = document.createElement("button");
+    favBtn.className = "action-btn" + (isFavorite ? " active" : "");
+    favBtn.title = isFavorite ? "取消收藏" : "收藏";
+    favBtn.innerHTML = isFavorite ? '<i class="fas fa-heart"></i>' : '<i class="far fa-heart"></i>';
+    favBtn.onclick = (e) => { e.stopPropagation(); toggleFavorite(m); };
+    actions.appendChild(favBtn);
+
+    // Printed Button
+    const printedBtn = document.createElement("button");
+    printedBtn.className = "action-btn" + (isPrinted ? " active" : "");
+    printedBtn.title = isPrinted ? "取消标记" : "标记已打印";
+    printedBtn.innerHTML = isPrinted ? '<i class="fas fa-check-circle"></i>' : '<i class="far fa-check-circle"></i>';
+    printedBtn.onclick = (e) => { e.stopPropagation(); togglePrinted(m); };
+    actions.appendChild(printedBtn);
+
+    // Spacer
+    const spacer = document.createElement("div");
+    spacer.style.flex = "1";
+    actions.appendChild(spacer);
+
+    // Delete Button
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "action-btn danger";
+    deleteBtn.title = "删除模型";
+    deleteBtn.innerHTML = '<i class="fas fa-trash-alt"></i>';
+    deleteBtn.onclick = (e) => { e.stopPropagation(); deleteModel(m); };
+    actions.appendChild(deleteBtn);
+
+    body.appendChild(actions);
+
+    // Append cover first, then body
+    card.appendChild(coverWrap);
     card.appendChild(body);
     grid.appendChild(card);
   });
 
-  renderPagination(totalPages);
+  // Show load more indicator if there are more items
+  updateLoadMoreIndicator(displayedCount < total);
 }
 
-// small helper to avoid embedding raw html
-function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-if(kwInput){
-  kwInput.addEventListener("input", () => { currentPage = 1; render(); });
+// Helper to create simple stat icon
+function createStatIcon(iconClass, count, title) {
+  const span = document.createElement("span");
+  span.className = "stat-chip";
+  span.title = title || "";
+  span.innerHTML = `<i class="${iconClass}"></i> ${count}`;
+  return span;
 }
-if(clearBtn && kwInput){
+
+function escapeHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+if (kwInput) {
+  kwInput.addEventListener("input", () => { displayedCount = loadIncrement; render(); });
+}
+if (clearBtn && kwInput) {
   clearBtn.addEventListener("click", () => {
     kwInput.value = "";
-    currentPage = 1;
+    displayedCount = loadIncrement;
     render();
   });
 }
 
-if(pageSizeInput){
-  pageSizeInput.addEventListener("input", () => {
-    pageSize = clampPageSize(pageSizeInput.value);
-    pageSizeInput.value = String(pageSize);
+// RESET BUTTON LISTENER
+const resetSearchBtn = document.getElementById("resetSearchBtn");
+if (resetSearchBtn) {
+  resetSearchBtn.addEventListener("click", () => {
+    if (kwInput) kwInput.value = "";
+    activeTag = "";
+    activeAuthor = "";
+    activeSource = "";
+    onlyFavorites = false;
+    onlyPrinted = false;
     currentPage = 1;
+    syncFlagFilterButtons();
+    renderFilters();
+    renderAuthorFilters();
+    renderSourceMenu();
     render();
   });
 }
 
-if(sortOrderSelect){
+// Removed pageSize input - using infinite scroll now
+
+if (sortOrderSelect) {
   sortOrderSelect.addEventListener("change", () => {
-    currentPage = 1;
+    displayedCount = loadIncrement;
     render();
   });
 }
 
-if(favOnlyBtn){
+if (favOnlyBtn) {
   favOnlyBtn.addEventListener("click", () => {
     onlyFavorites = !onlyFavorites;
-    currentPage = 1;
+    displayedCount = loadIncrement;
     syncFlagFilterButtons();
     render();
   });
 }
-if(printedOnlyBtn){
+if (printedOnlyBtn) {
   printedOnlyBtn.addEventListener("click", () => {
     onlyPrinted = !onlyPrinted;
-    currentPage = 1;
+    displayedCount = loadIncrement;
     syncFlagFilterButtons();
     render();
   });
 }
 
-if(filterModal){
+if (filterModal) {
   const closeBtn = filterModal.querySelector(".filter-modal__close");
-  if(closeBtn) closeBtn.addEventListener("click", closeFilterModal);
-  filterModal.addEventListener("click", (e) => { if(e.target === filterModal) closeFilterModal(); });
+  if (closeBtn) closeBtn.addEventListener("click", closeFilterModal);
+  filterModal.addEventListener("click", (e) => { if (e.target === filterModal) closeFilterModal(); });
 }
 
 // lightbox controls
-if(lightbox){
+if (lightbox) {
   const closeBtn = lightbox.querySelector('.lightbox-close');
   const prevBtn = lightbox.querySelector('.lightbox-prev');
   const nextBtn = lightbox.querySelector('.lightbox-next');
 
-  if(closeBtn) closeBtn.addEventListener('click', closeLightbox);
-  if(prevBtn) prevBtn.addEventListener('click', lightboxPrev);
-  if(nextBtn) nextBtn.addEventListener('click', lightboxNext);
+  if (closeBtn) closeBtn.addEventListener('click', closeLightbox);
+  if (prevBtn) prevBtn.addEventListener('click', lightboxPrev);
+  if (nextBtn) nextBtn.addEventListener('click', lightboxNext);
 
-  lightbox.addEventListener('click', (e) => { if(e.target === lightbox) closeLightbox(); });
+  lightbox.addEventListener('click', (e) => { if (e.target === lightbox) closeLightbox(); });
 
-  // touch / swipe support
   let touchStartX = 0; let touchStartY = 0; let touchStartTime = 0; let lastTap = 0;
   lightboxImg.addEventListener('touchstart', (e) => {
-    if(e.touches && e.touches.length === 1){
+    if (e.touches && e.touches.length === 1) {
       touchStartX = e.touches[0].clientX; touchStartY = e.touches[0].clientY; touchStartTime = Date.now();
     }
   }, { passive: true });
   lightboxImg.addEventListener('touchend', (e) => {
     const dt = Date.now() - touchStartTime;
     const now = Date.now();
-    // double tap to toggle zoom
-    if(now - lastTap < 300){
-      lightboxImg.classList.toggle('zoomed');
-      lastTap = 0; return;
-    }
+    if (now - lastTap < 300) { lightboxImg.classList.toggle('zoomed'); lastTap = 0; return; }
     lastTap = now;
-    if(dt < 500 && e.changedTouches && e.changedTouches.length === 1){
+    if (dt < 500 && e.changedTouches && e.changedTouches.length === 1) {
       const dx = e.changedTouches[0].clientX - touchStartX;
       const dy = e.changedTouches[0].clientY - touchStartY;
-      // horizontal swipe
-      if(Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)){
-        if(dx < 0) lightboxNext(); else lightboxPrev();
+      if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
+        if (dx < 0) lightboxNext(); else lightboxPrev();
       }
     }
   }, { passive: true });
 
-  // double click to toggle zoom (desktop)
   lightboxImg.addEventListener('dblclick', (e) => { e.preventDefault(); lightboxImg.classList.toggle('zoomed'); });
 
-  // keyboard navigation
   window.addEventListener('keydown', (e) => {
     const lightboxOpen = lightbox.style.display !== 'none';
     const modalOpen = filterModal && filterModal.style.display !== 'none';
-    if(e.key === 'Escape'){
-      if(modalOpen){ closeFilterModal(); return; }
-      if(lightboxOpen) closeLightbox();
+    if (e.key === 'Escape') {
+      if (modalOpen) { closeFilterModal(); return; }
+      if (lightboxOpen) closeLightbox();
     }
-    if(lightboxOpen){
-      if(e.key === 'ArrowLeft') lightboxPrev();
-      if(e.key === 'ArrowRight') lightboxNext();
+    if (lightboxOpen) {
+      if (e.key === 'ArrowLeft') lightboxPrev();
+      if (e.key === 'ArrowRight') lightboxNext();
     }
   });
 }

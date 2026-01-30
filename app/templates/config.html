@@ -1,235 +1,415 @@
 <!DOCTYPE html>
 <html lang="zh">
+
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MakerWorld 归档控制台</title>
   <link rel="icon" href="/static/imgs/fav.ico" sizes="any">
   <link rel="icon" type="image/png" href="/static/imgs/fav.png">
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <!-- CSS Files -->
+  <link rel="stylesheet" href="/static/css/variables.css">
+  <link rel="stylesheet" href="/static/css/reset.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+  <link rel="stylesheet" href="/static/css/config.css">
   <link rel="stylesheet" href="/static/css/manual_import.css">
-  <style>
-    body { font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; margin:0; padding:0; background:#f4f6f8; color:#222; }
-    .wrap { max-width: 960px; margin: 32px auto; background:#fff; border-radius:12px; box-shadow:0 8px 24px rgba(0,0,0,0.06); padding:24px 28px; }
-    h1 { margin:0 0 12px; font-size:24px; }
-    .section { margin-top:20px; }
-    label { display:block; margin:12px 0 6px; font-weight:600; }
-    textarea, input[type=text] { width:100%; padding:10px; border:1px solid #d0d7de; border-radius:8px; font-size:14px; box-sizing:border-box; }
-    button { padding:10px 16px; border:none; border-radius:8px; background:#1976d2; color:#fff; cursor:pointer; font-size:14px; }
-    button:hover { background:#1158a9; }
-    .row { display:flex; gap:12px; align-items:center; }
-    .row input { flex:1; }
-    .muted { color:#666; font-size:13px; }
-    .log-box { background:#0b1021; color:#d2e3ff; font-family: "Consolas", monospace; padding:12px; border-radius:8px; height:220px; overflow:auto; }
-    .tag { display:inline-block; padding:2px 8px; background:#e3f2fd; color:#1976d2; border-radius:12px; margin-right:6px; }
-    table { width:100%; border-collapse:collapse; margin-top:10px; }
-    th, td { border:1px solid #e5e7eb; padding:6px 8px; font-size:13px; }
-    th { background:#f5f7fa; }
-    .status-bad { color:#d32f2f; font-weight:600; }
-    .btn-delete { padding:4px 8px; background:#d32f2f; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:12px; }
-    .btn-delete:hover { background:#b71c1c; }
-    .btn-secondary { padding:8px 12px; background:#455a64; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px; }
-    .btn-secondary:hover { background:#324048; }
-    .links { text-align:right; display:flex; justify-content:flex-end; gap:10px; align-items:center; }
-    .links a { color:#1976d2; text-decoration:none; }
-  </style>
 </head>
+
 <body>
-<div class="wrap">
-  <div class="links">
-    <button class="btn-secondary" type="button" data-manual-import-open>手动导入</button>
-    <a href="/">模型库</a>
-  </div>
-  <h1>MakerWorld 归档控制台 <span style="font-size:14px;color:#666;">V2.2</span></h1>
-  <div class="muted">配置 Cookie 和下载目录，输入模型链接一键归档，支持查看缺失 3MF 列表。</div>
-
-  <div class="section" id="configSection">
-    <h3>基础配置</h3>
-    <label>Cookie</label>
-    <textarea id="cookieInput" rows="4" placeholder="请粘贴包含 cf_clearance 的完整 Cookie"></textarea>
-    <div class="row">
-      <div style="flex:1">
-        <label>下载目录</label>
-        <input type="text" id="downloadDir" readonly />
+  <div class="wrap">
+    <!-- Header -->
+    <div class="config-header">
+      <div>
+        <h1>
+          <i class="fas fa-archive"></i> MakerWorld 归档控制台
+          <span class="version">v3.0</span>
+        </h1>
       </div>
-      <div style="flex:1">
-        <label>日志目录</label>
-        <input type="text" id="logsDir" readonly />
+      <div class="config-links">
+        <button class="btn btn-secondary" type="button" data-manual-import-open>
+          <i class="fas fa-upload"></i> 手动导入
+        </button>
+        <a class="btn btn-outline" href="/">
+          <i class="fas fa-arrow-left"></i> 返回模型库
+        </a>
       </div>
     </div>
-    <div class="muted" id="cookieTime">Cookie 更新时间：-</div>
-    <button onclick="saveCookie()">保存 Cookie</button>
-  </div>
 
-  <div class="section">
-    <h3>模型归档</h3>
-    <label>模型链接</label>
-    <input type="text" id="modelUrl" placeholder="https://makerworld.com.cn/zh/models/..." />
-    <div style="margin-top:10px">
-      <button onclick="startArchive()">开始归档</button>
+    <!-- Tabs Container -->
+    <div class="tabs-container">
+      <!-- Tab Navigation -->
+      <div class="tabs">
+        <button class="tab active" data-tab="config">
+          <i class="fas fa-cog"></i> 配置信息
+        </button>
+        <button class="tab" data-tab="archive">
+          <i class="fas fa-download"></i> 模型归档
+        </button>
+        <button class="tab" data-tab="missing">
+          <i class="fas fa-exclamation-triangle"></i> 缺失记录
+        </button>
+      </div>
+
+      <!-- Tab Content: Config -->
+      <div class="tab-content active" id="tab-config">
+        <div class="form-section">
+          <h3>基础配置</h3>
+          <p class="description">配置 Cookie 和下载目录,确保归档功能正常运行</p>
+
+          <div class="form-group">
+            <label class="form-label">Cookie</label>
+            <div class="cookie-input-wrapper">
+              <textarea id="cookieInput" class="form-textarea" rows="4" placeholder="请粘贴包含 cf_clearance 的完整 Cookie"
+                style="font-family: var(--font-family-mono); font-size: var(--font-size-sm);"></textarea>
+              <button class="cookie-toggle" type="button" id="cookieToggle" title="显示/隐藏">
+                <i class="fas fa-eye"></i>
+              </button>
+            </div>
+            <div class="text-muted text-small mt-sm" id="cookieTime">Cookie 更新时间: -</div>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label">下载目录</label>
+              <input type="text" id="downloadDir" class="form-input" readonly />
+            </div>
+            <div class="form-group">
+              <label class="form-label">日志目录</label>
+              <input type="text" id="logsDir" class="form-input" readonly />
+            </div>
+          </div>
+
+          <button class="btn btn-primary" onclick="saveCookie()">
+            <i class="fas fa-save"></i> 保存 Cookie
+          </button>
+        </div>
+      </div>
+
+      <!-- Tab Content: Archive -->
+      <div class="tab-content" id="tab-archive">
+        <div class="form-section">
+          <h3>模型归档</h3>
+          <p class="description">输入 MakerWorld 模型链接,一键归档到本地</p>
+
+          <div class="info-box">
+            <i class="fas fa-info-circle"></i>
+            <div class="info-box-content">
+              <div class="info-box-title">使用说明</div>
+              <div class="info-box-text">
+                支持归档 MakerWorld 模型的所有内容,包括图片、3MF 文件、描述等。
+                归档完成后可在模型库中查看。
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">模型链接</label>
+            <div class="archive-input-group">
+              <input type="text" id="modelUrl" class="form-input"
+                placeholder="https://makerworld.com.cn/zh/models/..." />
+              <button class="btn btn-primary" onclick="startArchive()">
+                <i class="fas fa-download"></i> 开始归档
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab Content: Missing -->
+      <div class="tab-content" id="tab-missing">
+        <div class="form-section">
+          <h3>缺失 3MF 记录</h3>
+          <p class="description">查看和重新下载缺失的 3MF 文件</p>
+
+          <div class="info-box">
+            <i class="fas fa-exclamation-circle"></i>
+            <div class="info-box-content">
+              <div class="info-box-title">注意事项</div>
+              <div class="info-box-text">
+                重新获取实例下载地址需要最新 Cookie,请先在配置页面更新后再执行。
+              </div>
+            </div>
+          </div>
+
+          <div class="flex justify-between items-center mb-lg">
+            <div class="text-muted">共 <span id="missingCount">0</span> 条缺失记录</div>
+            <button class="btn btn-secondary" onclick="retryMissing()">
+              <i class="fas fa-redo"></i> 重新下载缺失 3MF
+            </button>
+          </div>
+
+          <div id="missingBox"></div>
+        </div>
+      </div>
     </div>
-    <div class="muted">完成后提示下载目录。</div>
   </div>
 
-  <div class="section">
-    <h3>实时日志</h3>
-    <div class="log-box" id="logBox"></div>
-  </div>
-
-  <div class="section">
-    <h3>缺失 3MF 记录</h3>
-    <div class="row" style="justify-content:space-between; align-items:center;">
-      <div class="muted">重新获取实例下载地址需要最新 Cookie，请先在上方更新后再执行。</div>
-      <button class="btn-secondary" onclick="retryMissing()">重新下载缺失 3MF</button>
+  <!-- Log Terminal (Fixed Bottom) -->
+  <div class="log-terminal collapsed" id="logTerminal">
+    <div class="log-terminal-header" onclick="toggleLogTerminal()">
+      <div class="log-terminal-title">
+        <i class="fas fa-terminal"></i>
+        <span>实时日志</span>
+      </div>
+      <button class="log-terminal-toggle" type="button">
+        <i class="fas fa-chevron-up" id="logToggleIcon"></i>
+      </button>
     </div>
-    <div id="missingBox"></div>
+    <div class="log-terminal-body" id="logBox"></div>
   </div>
-</div>
 
-<div id="manualImportModal" class="manual-modal" aria-hidden="true">
-  <div class="manual-modal__inner" role="dialog" aria-modal="true" aria-labelledby="manualImportTitle">
-    <div class="manual-modal__header">
-      <div id="manualImportTitle" class="manual-modal__title">手动导入模型</div>
-      <button class="manual-modal__close" type="button" data-manual-import-close>×</button>
+  <!-- Manual Import Modal -->
+  <div id="manualImportModal" class="manual-modal" aria-hidden="true">
+    <div class="manual-modal__inner" role="dialog" aria-modal="true" aria-labelledby="manualImportTitle">
+      <div class="manual-modal__header">
+        <div id="manualImportTitle" class="manual-modal__title">手动导入模型</div>
+        <button class="manual-modal__close" type="button" data-manual-import-close>×</button>
+      </div>
+      <form id="manualImportForm" class="manual-form">
+        <div class="manual-grid">
+          <div>
+            <label>模型名称</label>
+            <input type="text" name="title" required>
+          </div>
+          <div>
+            <label>模型地址</label>
+            <input type="text" name="modelLink" placeholder="https://example.com/model">
+          </div>
+          <div>
+            <label>模型来源</label>
+            <input type="text" name="sourceLink" placeholder="https://example.com">
+          </div>
+        </div>
+        <div class="manual-row">
+          <label>模型介绍</label>
+          <textarea name="summary" rows="4" placeholder="填写模型介绍..."></textarea>
+        </div>
+        <div class="manual-row">
+          <label>标签 (空格分隔)</label>
+          <input type="text" name="tags" placeholder="配件 打印支架 原创">
+        </div>
+        <div class="manual-row">
+          <label>封面图片</label>
+          <input type="file" name="cover" accept="image/*">
+        </div>
+        <div class="manual-row">
+          <label>设计图片 (多选)</label>
+          <input type="file" name="design_images" accept="image/*" multiple>
+        </div>
+        <div class="manual-row">
+          <label>实例文件</label>
+          <div class="manual-inline">
+            <button class="manual-btn" type="button" id="manualAddInstance">添加实例文件</button>
+            <span class="manual-help">可多次添加</span>
+          </div>
+          <input type="file" id="manualInstancePicker" accept=".3mf" multiple style="display:none">
+          <div id="instanceDescList" class="file-desc-list"></div>
+        </div>
+        <div class="manual-row">
+          <label>附件文件 (多选)</label>
+          <input type="file" name="attachments" multiple>
+        </div>
+        <div class="manual-actions">
+          <button class="manual-btn" type="button" data-manual-import-close>取消</button>
+          <button class="manual-btn primary" type="submit" id="manualImportSubmit">保存</button>
+        </div>
+        <div class="manual-msg" id="manualImportMsg"></div>
+      </form>
     </div>
-    <form id="manualImportForm" class="manual-form">
-      <div class="manual-grid">
-        <div>
-          <label>模型名称</label>
-          <input type="text" name="title" required>
-        </div>
-        <div>
-          <label>模型地址</label>
-          <input type="text" name="modelLink" placeholder="https://example.com/model">
-        </div>
-        <div>
-          <label>模型来源</label>
-          <input type="text" name="sourceLink" placeholder="https://example.com">
-        </div>
-      </div>
-      <div class="manual-row">
-        <label>模型介绍</label>
-        <textarea name="summary" rows="4" placeholder="填写模型介绍..."></textarea>
-      </div>
-      <div class="manual-row">
-        <label>标签 (空格分隔)</label>
-        <input type="text" name="tags" placeholder="配件 打印支架 原创">
-      </div>
-      <div class="manual-row">
-        <label>封面图片</label>
-        <input type="file" name="cover" accept="image/*">
-      </div>
-      <div class="manual-row">
-        <label>设计图片 (多选)</label>
-        <input type="file" name="design_images" accept="image/*" multiple>
-      </div>
-      <div class="manual-row">
-        <label>实例文件</label>
-        <div class="manual-inline">
-          <button class="manual-btn" type="button" id="manualAddInstance">添加实例文件</button>
-          <span class="manual-help">可多次添加</span>
-        </div>
-        <input type="file" id="manualInstancePicker" accept=".3mf" multiple style="display:none">
-        <div id="instanceDescList" class="file-desc-list"></div>
-      </div>
-      <div class="manual-row">
-        <label>附件文件 (多选)</label>
-        <input type="file" name="attachments" multiple>
-      </div>
-      <div class="manual-actions">
-        <button class="manual-btn" type="button" data-manual-import-close>取消</button>
-        <button class="manual-btn primary" type="submit" id="manualImportSubmit">保存</button>
-      </div>
-      <div class="manual-msg" id="manualImportMsg"></div>
-    </form>
   </div>
-</div>
 
-<script>
-const logBox = document.getElementById('logBox');
-function appendLog(msg){
-  const time = new Date().toLocaleTimeString();
-  logBox.textContent += `[${time}] ${msg}\n`;
-  logBox.scrollTop = logBox.scrollHeight;
-}
+  <script>
+    // Tab Switching
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const targetTab = tab.dataset.tab;
 
-async function loadConfig(){
-  const res = await fetch('/api/config');
-  const data = await res.json();
-  document.getElementById('downloadDir').value = data.download_dir;
-  document.getElementById('logsDir').value = data.logs_dir;
-  document.getElementById('cookieTime').textContent = 'Cookie 更新时间：' + (data.cookie_updated_at || '-');
-}
+        // Update tab buttons
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
 
-async function saveCookie(){
-  const cookie = document.getElementById('cookieInput').value.trim();
-  if(!cookie){ alert('请填写 cookie'); return; }
-  appendLog('保存 Cookie...');
-  const res = await fetch('/api/cookie',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cookie})});
-  if(res.ok){ appendLog('Cookie 已保存'); loadConfig(); }
-  else { appendLog('保存失败'); }
-}
+        // Update tab content
+        document.querySelectorAll('.tab-content').forEach(content => {
+          content.classList.remove('active');
+        });
+        document.getElementById(`tab-${targetTab}`).classList.add('active');
+      });
+    });
 
-async function startArchive(){
-  const url = document.getElementById('modelUrl').value.trim();
-  if(!url){ alert('请填写模型链接'); return; }
-  appendLog('开始归档: '+url);
-  const res = await fetch('/api/archive',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
-  if(res.ok){
-    const data = await res.json();
-    appendLog('归档成功 -> '+data.work_dir);
-    alert('归档完成，目录：'+data.work_dir);
+    // Log Terminal Toggle
+    function toggleLogTerminal() {
+      const terminal = document.getElementById('logTerminal');
+      const icon = document.getElementById('logToggleIcon');
+      terminal.classList.toggle('collapsed');
+
+      if (terminal.classList.contains('collapsed')) {
+        icon.className = 'fas fa-chevron-up';
+      } else {
+        icon.className = 'fas fa-chevron-down';
+      }
+    }
+
+    // Cookie Toggle Visibility
+    document.getElementById('cookieToggle')?.addEventListener('click', function () {
+      const textarea = document.getElementById('cookieInput');
+      const icon = this.querySelector('i');
+
+      if (textarea.type === 'password' || textarea.style.webkitTextSecurity === 'disc') {
+        textarea.style.webkitTextSecurity = 'none';
+        icon.className = 'fas fa-eye-slash';
+      } else {
+        textarea.style.webkitTextSecurity = 'disc';
+        icon.className = 'fas fa-eye';
+      }
+    });
+
+    // Initialize cookie masking
+    const cookieInput = document.getElementById('cookieInput');
+    if (cookieInput) {
+      cookieInput.style.webkitTextSecurity = 'disc';
+    }
+
+    // Log Functions
+    const logBox = document.getElementById('logBox');
+    function appendLog(msg) {
+      const time = new Date().toLocaleTimeString();
+      logBox.textContent += `[${time}] ${msg}\n`;
+      logBox.scrollTop = logBox.scrollHeight;
+
+      // Auto-expand terminal when new log arrives
+      const terminal = document.getElementById('logTerminal');
+      if (terminal.classList.contains('collapsed')) {
+        toggleLogTerminal();
+      }
+    }
+
+    // Config Functions
+    async function loadConfig() {
+      const res = await fetch('/api/config');
+      const data = await res.json();
+      document.getElementById('downloadDir').value = data.download_dir;
+      document.getElementById('logsDir').value = data.logs_dir;
+      document.getElementById('cookieTime').textContent = 'Cookie 更新时间: ' + (data.cookie_updated_at || '-');
+    }
+
+    async function saveCookie() {
+      const cookie = document.getElementById('cookieInput').value.trim();
+      if (!cookie) {
+        alert('请填写 cookie');
+        return;
+      }
+      appendLog('保存 Cookie...');
+      const res = await fetch('/api/cookie', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cookie })
+      });
+      if (res.ok) {
+        appendLog('Cookie 已保存');
+        loadConfig();
+      } else {
+        appendLog('保存失败');
+      }
+    }
+
+    async function startArchive() {
+      const url = document.getElementById('modelUrl').value.trim();
+      if (!url) {
+        alert('请填写模型链接');
+        return;
+      }
+      appendLog('开始归档: ' + url);
+      const res = await fetch('/api/archive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        appendLog('归档成功 -> ' + data.work_dir);
+        alert('归档完成,目录:' + data.work_dir);
+        loadMissing();
+      } else {
+        const err = await res.text();
+        appendLog('归档失败: ' + err);
+        alert('归档失败');
+      }
+    }
+
+    async function retryMissing() {
+      if (!confirm('请先更新 Cookie,是否开始重新下载缺失 3MF 记录?')) return;
+      appendLog('开始重新下载缺失 3MF...');
+      const res = await fetch('/api/logs/missing-3mf/redownload', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        appendLog(`重新下载完成,成功 ${data.success}/${data.processed},失败 ${data.failed}`);
+        alert(`重新下载完成,成功 ${data.success}/${data.processed},失败 ${data.failed}`);
+        loadMissing();
+      } else {
+        const err = await res.text();
+        appendLog('重试失败: ' + err);
+        alert('下载失败: ' + err);
+      }
+    }
+
+    async function deleteMissing(index) {
+      if (!confirm('确定删除此记录吗?')) return;
+      appendLog('删除缺失记录 #' + index);
+      const res = await fetch('/api/logs/missing-3mf/' + index, { method: 'DELETE' });
+      if (res.ok) {
+        appendLog('已删除');
+        loadMissing();
+      } else {
+        appendLog('删除失败');
+      }
+    }
+
+    async function loadMissing() {
+      const box = document.getElementById('missingBox');
+      const res = await fetch('/api/logs/missing-3mf');
+      if (!res.ok) {
+        box.innerHTML = '<div class="text-muted">加载失败</div>';
+        return;
+      }
+      const list = await res.json();
+      document.getElementById('missingCount').textContent = list.length;
+
+      if (!list.length) {
+        box.innerHTML = '<div class="text-muted text-center">暂无缺失记录</div>';
+        return;
+      }
+
+      let html = '<div class="missing-table-wrapper"><table class="missing-table">';
+      html += '<thead><tr><th>时间</th><th>模型</th><th>实例ID</th><th>标题</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+
+      list.forEach((r, i) => {
+        html += `<tr>
+      <td>${r.time}</td>
+      <td>${r.base_name}</td>
+      <td>${r.inst_id}</td>
+      <td>${r.title || ''}</td>
+      <td><span class="status-badge error">${r.status || ''}</span></td>
+      <td>
+        <div class="table-actions">
+          <button class="btn btn-table btn-danger" onclick="deleteMissing(${i})">
+            <i class="fas fa-trash"></i> 删除
+          </button>
+        </div>
+      </td>
+    </tr>`;
+      });
+
+      html += '</tbody></table></div>';
+      box.innerHTML = html;
+    }
+
+    // Initialize
+    loadConfig();
     loadMissing();
-  }else{
-    const err = await res.text();
-    appendLog('归档失败: '+err);
-    alert('归档失败');
-  }
-}
-
-async function retryMissing(){
-  if(!confirm('请先更新 Cookie，是否开始重新下载缺失 3MF 记录？')) return;
-  appendLog('开始重新下载缺失 3MF...');
-  const res = await fetch('/api/logs/missing-3mf/redownload',{method:'POST'});
-  if(res.ok){
-    const data = await res.json();
-    appendLog(`重新下载完成，成功 ${data.success}/${data.processed}，失败 ${data.failed}`);
-    alert(`重新下载完成，成功 ${data.success}/${data.processed}，失败 ${data.failed}`);
-    loadMissing();
-  }else{
-    const err = await res.text();
-    appendLog('重试失败: '+err);
-    alert('下载失败: '+err);
-  }
-}
-
-async function deleteMissing(index){
-  if(!confirm('确定删除此记录吗？')) return;
-  appendLog('删除缺失记录 #'+index);
-  const res = await fetch('/api/logs/missing-3mf/'+index,{method:'DELETE'});
-  if(res.ok){
-    appendLog('已删除');
-    loadMissing();
-  }else{
-    appendLog('删除失败');
-  }
-}
-
-async function loadMissing(){
-  const box = document.getElementById('missingBox');
-  const res = await fetch('/api/logs/missing-3mf');
-  if(!res.ok){ box.innerHTML = '加载失败'; return; }
-  const list = await res.json();
-  if(!list.length){ box.innerHTML = '<div class="muted">暂无缺失记录</div>'; return; }
-  let html = '<table><tr><th>时间</th><th>模型</th><th>实例ID</th><th>标题</th><th>状态</th><th>操作</th></tr>';
-  list.forEach((r,i)=>{
-    html += `<tr><td>${r.time}</td><td>${r.base_name}</td><td>${r.inst_id}</td><td>${r.title||''}</td><td class="status-bad">${r.status||''}</td><td><button class="btn-delete" onclick="deleteMissing(${i})">删除</button></td></tr>`;
-  });
-  html += '</table>';
-  box.innerHTML = html;
-}
-
-loadConfig();
-loadMissing();
-</script>
-<script src="/static/js/manual_import.js" defer></script>
+  </script>
+  <script src="/static/js/manual_import.js" defer></script>
 </body>
+
 </html>
