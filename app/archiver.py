@@ -540,65 +540,177 @@ def collect_design_images(design: dict, session: requests.Session, out_dir: Path
     return design_images, cover_meta
 
 
-def fetch_instance_3mf(session: requests.Session, inst_id: int, raw_cookie: str, api_url: str = None):
+def _normalize_api_base(base: Optional[str]) -> Optional[str]:
+    if not base:
+        return None
+    base = base.strip()
+    if not base:
+        return None
+    if not base.startswith("http://") and not base.startswith("https://"):
+        base = f"https://{base}"
+    return base.rstrip("/")
+
+
+def _unique_preserve(seq: List[str]) -> List[str]:
+    seen = set()
+    out = []
+    for item in seq:
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
+def _build_instance_api_candidates(
+    inst_id: int,
+    api_url: Optional[str],
+    origin: Optional[str],
+    api_host_hint: Optional[str],
+) -> List[str]:
+    candidates = []
+    if api_url:
+        candidates.append(api_url)
+
+    bases = []
+    for base in [origin, api_host_hint, "https://api.bambulab.cn", "https://api.bambulab.com"]:
+        normalized = _normalize_api_base(base)
+        if normalized:
+            bases.append(normalized)
+
+    path_templates = [
+        "/api/v1/design-service/instance/{id}/f3mf",
+        "/v1/design-service/instance/{id}/f3mf",
+    ]
+    prefixes = ["", "/makerworld"]
+    file_types = ["", "3mf"]
+
+    for base in bases:
+        for prefix in prefixes:
+            for path in path_templates:
+                for file_type in file_types:
+                    candidates.append(
+                        f"{base}{prefix}{path.format(id=inst_id)}?type=download&fileType={file_type}"
+                    )
+
+    return _unique_preserve(candidates)
+
+
+def _extract_instance_download(data: object) -> tuple[str, str]:
+    payload = data
+    if isinstance(data, dict):
+        payload = data.get("data") or data.get("result") or data
+    if not isinstance(payload, dict):
+        return "", ""
+    name = (
+        payload.get("name")
+        or payload.get("fileName")
+        or payload.get("filename")
+        or payload.get("file_name")
+        or ""
+    )
+    url = (
+        payload.get("url")
+        or payload.get("downloadUrl")
+        or payload.get("download_url")
+        or payload.get("downloadURL")
+        or ""
+    )
+    return name or "", url or ""
+
+
+def _looks_like_html(text: str) -> bool:
+    if not text:
+        return False
+    head = text.lstrip()[:200].lower()
+    return head.startswith("<!doctype html") or "<html" in head
+
+
+def fetch_instance_3mf(
+    session: requests.Session,
+    inst_id: int,
+    raw_cookie: str,
+    api_url: str = None,
+    api_host_hint: Optional[str] = None,
+    origin: Optional[str] = None,
+):
     """
-    获取实例的 3MF 下载地址，允许外部传入 api_url（若为空则使用默认实例接口）。
+    获取实例的 3MF 下载地址，允许外部传入 api_url，并自动回退不同 API Host。
+    返回: (name, url, used_api_url)
     """
-    api_url = api_url or f"https://makerworld.com.cn/api/v1/design-service/instance/{inst_id}/f3mf?type=download&fileType="
-    try:
-        r = session.get(
-            api_url,
-            timeout=30,
-            headers={
-                "Accept": "application/json, text/plain, */*",
-                "Referer": "https://makerworld.com.cn/",
-                "Cookie": raw_cookie,
-                "Accept-Encoding": "identity",
-                "User-Agent": session.headers.get("User-Agent", "Mozilla/5.0 (MW-Fetcher)"),
-            },
-        )
-        log("[3MF] GET", api_url, "status", r.status_code)
-        text_preview = r.text[:200] if r.text else ""
-        log("[3MF] 响应前 200 字符:", text_preview)
-        r.raise_for_status()
-        data = r.json()
-        return data.get("name") or "", data.get("url") or ""
-    except Exception as e:
-        log("3MF 获取失败(尝试 curl)", inst_id, e)
-        # 再用 curl 试一次，带同样的 Cookie
+    candidates = _build_instance_api_candidates(inst_id, api_url, origin, api_host_hint)
+    last_error = None
+    for candidate in candidates:
+        try:
+            r = session.get(
+                candidate,
+                timeout=30,
+                headers={
+                    "Accept": "application/json, text/plain, */*",
+                    "Referer": origin or "https://makerworld.com.cn/",
+                    "Cookie": raw_cookie,
+                    "User-Agent": session.headers.get("User-Agent", "Mozilla/5.0 (MW-Fetcher)"),
+                },
+            )
+            log("[3MF] GET", candidate, "status", r.status_code)
+            text_preview = r.text[:200] if r.text else ""
+            log("[3MF] 响应前 200 字符:", text_preview)
+            if r.status_code >= 400:
+                if _is_cloudflare_challenge(text_preview) or _looks_like_html(text_preview):
+                    continue
+                last_error = RuntimeError(f"status={r.status_code}")
+                continue
+            try:
+                data = r.json()
+            except Exception as je:
+                if _is_cloudflare_challenge(text_preview) or _looks_like_html(text_preview):
+                    continue
+                last_error = je
+                continue
+            name, url = _extract_instance_download(data)
+            if url:
+                return name, url, candidate
+        except Exception as e:
+            last_error = e
+            continue
+
+    log("3MF 获取失败(尝试 curl)", inst_id, last_error)
+    for candidate in candidates:
         cmd = [
             "curl",
             "-sSL",
+            "--compressed",
             "-H",
             "Accept: application/json, text/plain, */*",
             "-H",
-            "Accept-Encoding: identity",
-            "-H",
             f"Cookie: {raw_cookie}",
             "-H",
-            "Referer: https://makerworld.com.cn/",
+            f"Referer: {origin or 'https://makerworld.com.cn/'}",
             "-H",
             f"User-Agent: {session.headers.get('User-Agent', 'Mozilla/5.0 (MW-Fetcher-curl)')}",
-            api_url,
+            candidate,
         ]
         try:
             res = subprocess.run(cmd, capture_output=True, text=False)
             if res.returncode != 0:
                 err_msg = res.stderr.decode(errors="ignore") if res.stderr else ""
                 log("3MF curl 失败 code=", res.returncode, "stderr:", err_msg[:200])
-                return "", ""
+                continue
             body = res.stdout or b""
             preview = body[:200]
             log("3MF curl 返回长度:", len(body), "前 200 字符:", preview)
             try:
                 data = json.loads(body.decode("utf-8", errors="ignore"))
-                return data.get("name") or "", data.get("url") or ""
             except Exception as je:
                 log("3MF curl JSON 解析失败:", je)
-                return "", ""
+                continue
+            name, url = _extract_instance_download(data)
+            if url:
+                return name, url, candidate
         except Exception as ce:
             log("3MF curl 调用异常:", ce)
-            return "", ""
+            continue
+    return "", "", api_url or ""
 
 
 def collect_instance_media(inst: dict, session: requests.Session, out_dir: Path, base_name: str):
@@ -2060,8 +2172,8 @@ def archive_model(url: str, cookie: str, download_dir: Path, logs_dir: Path, log
     except Exception as e:
         log(logger, "解析 __NEXT_DATA__ 失败，尝试 API 获取:", e)
 
+    api_host_hint = _extract_api_host(html_text)
     if design is None:
-        api_host_hint = _extract_api_host(html_text)
         design = fetch_design_from_api(sess, raw_cookie_header, fetch_url, api_host_hint=api_host_hint)
 
     if design is None:
@@ -2099,11 +2211,13 @@ def archive_model(url: str, cookie: str, download_dir: Path, logs_dir: Path, log
             continue
         plates, pics = collect_instance_media(inst, sess, images_dir, base_name)
         api_url = inst.get("apiUrl") or f"{origin}/api/v1/design-service/instance/{inst_id}/f3mf?type=download&fileType="
-        name3mf, url3mf = fetch_instance_3mf(
+        name3mf, url3mf, used_api_url = fetch_instance_3mf(
             sess,
             inst_id,
             raw_cookie_header,
             api_url,
+            api_host_hint=api_host_hint,
+            origin=origin,
         )
         inst_list.append({
             "id": inst_id,
@@ -2125,7 +2239,7 @@ def archive_model(url: str, cookie: str, download_dir: Path, logs_dir: Path, log
             "summaryTranslated": inst.get("summaryTranslated") or "",
             "name": name3mf,
             "downloadUrl": url3mf,
-            "apiUrl": api_url,
+            "apiUrl": used_api_url or api_url,
         })
 
     meta = build_meta(design, summary, design_images, cover_meta, inst_list, author, base_name)

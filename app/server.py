@@ -281,7 +281,7 @@ def retry_missing_downloads(cfg, cookie: str):
             inst_id_int = inst_id_str
 
         try:
-            name3mf, dl_url = fetch_instance_3mf(session, inst_id_int, cookie, api_url)
+            name3mf, dl_url, used_api_url = fetch_instance_3mf(session, inst_id_int, cookie, api_url)
         except Exception as e:
             logger.error("实例 %s 获取 3MF 失败: %s", inst_id_str, e)
             details.append({"status": "fail", "base_name": base_name, "inst_id": inst_id_str, "message": f"接口获取失败: {e}"})
@@ -311,6 +311,8 @@ def retry_missing_downloads(cfg, cookie: str):
             continue
 
         target["downloadUrl"] = dl_url
+        if used_api_url:
+            target["apiUrl"] = used_api_url
         if name3mf:
             target["name"] = name3mf
         try:
@@ -361,7 +363,7 @@ def redownload_instance_by_id(cfg, cookie: str, inst_id: int):
         found += 1
         api_url = target.get("apiUrl") or f"https://makerworld.com.cn/api/v1/design-service/instance/{inst_id}/f3mf?type=download&fileType="
         try:
-            name3mf, dl_url = fetch_instance_3mf(session, inst_id, cookie, api_url)
+            name3mf, dl_url, used_api_url = fetch_instance_3mf(session, inst_id, cookie, api_url)
         except Exception as e:
             details.append({"status": "fail", "base_name": meta.get("baseName"), "inst_id": inst_id, "message": f"接口失败: {e}"})
             continue
@@ -387,6 +389,8 @@ def redownload_instance_by_id(cfg, cookie: str, inst_id: int):
             continue
 
         target["downloadUrl"] = dl_url
+        if used_api_url:
+            target["apiUrl"] = used_api_url
         if name3mf:
             target["name"] = name3mf
         try:
@@ -452,7 +456,7 @@ def redownload_model_by_id(cfg, cookie: str, model_id: int):
             except Exception:
                 inst_id_int = inst_id
             try:
-                name3mf, dl_url = fetch_instance_3mf(session, inst_id_int, cookie, api_url)
+                name3mf, dl_url, used_api_url = fetch_instance_3mf(session, inst_id_int, cookie, api_url)
             except Exception as e:
                 details.append({"status": "fail", "base_name": meta.get("baseName"), "inst_id": inst_id, "message": f"接口失败: {e}"})
                 continue
@@ -475,6 +479,8 @@ def redownload_model_by_id(cfg, cookie: str, model_id: int):
                 continue
 
             inst["downloadUrl"] = dl_url
+            if used_api_url:
+                inst["apiUrl"] = used_api_url
             if name3mf:
                 inst["name"] = name3mf
             success += 1
