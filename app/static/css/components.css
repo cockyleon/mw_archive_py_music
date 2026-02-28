@@ -329,6 +329,18 @@
     border-bottom-color: var(--color-primary);
 }
 
+@media (max-width: 992px) {
+    .tab {
+        font-size: 0;
+        padding: var(--spacing-md) 12px;
+    }
+
+    .tab i.fa {
+        font-size: 20px;
+        margin: 0;
+    }
+}
+
 /* Modal */
 .modal {
     position: fixed;

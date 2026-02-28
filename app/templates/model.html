@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>模型详情</title>
+    <link rel="icon" href="/static/imgs/fav.ico" sizes="any">
+    <link rel="icon" type="image/png" href="/static/imgs/fav.png">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/variables.css">
+    <link rel="stylesheet" href="/static/css/model.css?v=2.6">
+</head>
+
+<body>
+
+    <div class="container" id="app">
+        <!-- 加载状态 -->
+        <div class="loading" id="loadingState">
+            <div class="spinner"></div>
+            <div>正在加载模型数据…</div>
+        </div>
+
+        <!-- 错误状态 -->
+        <div class="error-msg hidden" id="errorState"></div>
+
+        <!-- 主内容（初始隐藏） -->
+        <div class="layout-wrapper hidden" id="mainContent">
+
+            <!-- 左栏: 图文展示区 -->
+            <div class="layout-main">
+                <!-- 顶部图集 (轮播 / 英雄图) -->
+                <div class="gallery-section card-block">
+                    <img class="hero hidden" id="heroImage" src="" alt="screenshot">
+                    <div id="carouselSection"></div>
+                </div>
+
+                <!-- 简介区 -->
+                <div class="summary-section card-block">
+                    <div class="section-title"><i class="fas fa-file-alt"></i> 模型简介</div>
+                    <div class="summary" id="summaryContent"></div>
+                </div>
+
+                <!-- 打印成品墙 -->
+                <div class="printed-section card-block">
+                    <div class="section-title"><i class="fas fa-camera"></i> 打印成品</div>
+                    <div class="printed">
+                        <div class="attach-upload">
+                            <input type="file" id="printedInput" multiple accept="image/*">
+                            <button class="btn btn-outline" type="button" id="printedUploadBtn">
+                                <i class="fas fa-upload"></i> 上传图片
+                            </button>
+                            <span class="attach-msg" id="printedMsg"></span>
+                        </div>
+                        <div class="printed-grid" id="printedList"></div>
+                    </div>
+                </div>
+
+                <!-- 附件文件 (移动至左侧下方) -->
+                <div class="attachments-section card-block">
+                    <div class="section-title"><i class="fas fa-paperclip"></i> 附件文件</div>
+                    <div class="attachments">
+                        <div class="attach-upload">
+                            <input type="file" id="attachInput" multiple>
+                            <button class="btn btn-outline" type="button" id="attachUploadBtn">
+                                <i class="fas fa-upload"></i> 上传附件
+                            </button>
+                            <span class="attach-msg" id="attachMsg"></span>
+                        </div>
+                        <ul class="attach-list" id="attachList"></ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右栏: 信息与操作区 -->
+            <div class="layout-side">
+                <!-- 最上方: 基本信息块 (移动端 order 1) -->
+                <div class="info-section card-block">
+                    <h1 class="title" id="titleSection"></h1>
+                    <div class="author" id="authorSection"></div>
+                    <div class="collect-date" id="collectDate"></div>
+                    <div id="statsSection"></div>
+                </div>
+
+                <!-- 标签 (移动端 order 2) -->
+                <div class="tags-section card-block hidden" id="tagsBlock">
+                    <div class="section-title"><i class="fas fa-tags"></i> 标签</div>
+                    <div class="tag-list" id="tagList"></div>
+                </div>
+
+                <!-- 打印配置 / 实例 (移动端 order 4) -->
+                <div class="instances-section card-block">
+                    <div class="section-title"><i class="fas fa-layer-group"></i> 打印配置</div>
+                    <div class="instances" id="instanceList"></div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- 盘片详情 Modal -->
+    <div class="modal-overlay" id="platesModal">
+        <div class="modal-content">
+            <div class="modal-preview-area" id="platesModalPreview">
+                <!-- 动态大图预览 -->
+            </div>
+            <div class="modal-side-panel">
+                <div class="modal-header">
+                    <h3>分盘详情</h3>
+                    <button class="modal-close" id="platesModalClose"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body" id="platesModalBody">
+                    <!-- Javascript 动态填充 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 灯箱 -->
+    <div class="lightbox" id="imgLightbox">
+        <button class="lb-nav lb-prev"><i class="fas fa-chevron-left"></i></button>
+        <img src="" alt="preview">
+        <button class="lb-nav lb-next"><i class="fas fa-chevron-right"></i></button>
+    </div>
+
+    <script src="/static/js/model.js?v=2.6"></script>
+</body>
+
+</html>

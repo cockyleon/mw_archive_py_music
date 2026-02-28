@@ -4,6 +4,7 @@ let activeAuthor = "";
 let activeSource = "";
 let onlyFavorites = false;
 let onlyPrinted = false;
+let useV2 = localStorage.getItem('useV2') === 'true';
 let displayedCount = 20; // Initial display count
 let loadIncrement = 20; // Load 20 more each time
 let isTagsExpanded = false;
@@ -515,7 +516,7 @@ function render(append = false) {
     // Cover Area (Clean, No Overlay)
     const coverWrap = document.createElement("div");
     coverWrap.className = "card-cover";
-    coverWrap.onclick = () => window.open(`/files/${m.dir}/index.html`, `_blank`);
+    coverWrap.onclick = () => window.open(getModelDetailUrl(m), `_blank`);
 
     const cover = document.createElement("img");
     const coverName = m.cover || "design_01.png";
@@ -534,7 +535,7 @@ function render(append = false) {
     title.className = "title";
     title.title = m.title || m.baseName || "未知模型";
     title.textContent = m.title || m.baseName || "未知模型";
-    title.onclick = () => window.open(`/files/${m.dir}/index.html`, `_blank`);
+    title.onclick = () => window.open(getModelDetailUrl(m), `_blank`);
     body.appendChild(title);
 
     // Author Info
@@ -655,6 +656,10 @@ function createStatIcon(iconClass, count, title) {
   span.title = title || "";
   span.innerHTML = `<i class="${iconClass}"></i> ${count}`;
   return span;
+}
+
+function getModelDetailUrl(m) {
+  return useV2 ? `/v2/files/${m.dir}` : `/files/${m.dir}/index.html`;
 }
 
 function escapeHtml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
@@ -838,6 +843,23 @@ if (lightbox) {
     }
   });
 }
+
+// v1/v2 toggle
+(function initV2Toggle() {
+  const btn = document.getElementById('v2ToggleBtn');
+  if (!btn) return;
+  function syncBtn() {
+    btn.classList.toggle('active', useV2);
+    btn.title = useV2 ? '当前 V2 页面（点击切换为 V1）' : '当前 V1 页面（点击切换为 V2）';
+    btn.querySelector('.toggle-label').textContent = useV2 ? 'V2' : 'V1';
+  }
+  syncBtn();
+  btn.addEventListener('click', () => {
+    useV2 = !useV2;
+    localStorage.setItem('useV2', useV2 ? 'true' : 'false');
+    syncBtn();
+  });
+})();
 
 load();
 setupInfiniteScroll();

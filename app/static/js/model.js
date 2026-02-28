@@ -1,0 +1,794 @@
+/**
+ * model.js — v2 模型详情页前端渲染
+ * 读取 meta.json 并动态生成所有页面内容
+ */
+(function () {
+    'use strict';
+
+    // ============ 工具函数 ============
+
+    /** 从 URL 路径解析 modelDir */
+    function getModelDir() {
+        var parts = location.pathname.split('/').filter(Boolean);
+        // 路由: /v2/files/{modelDir}
+        var idx = parts.indexOf('v2');
+        if (idx >= 0 && parts[idx + 1] === 'files' && parts.length > idx + 2) {
+            return decodeURIComponent(parts[idx + 2]);
+        }
+        return '';
+    }
+
+    /** 构建模型文件目录下的相对资源 URL */
+    function fileUrl(modelDir, relPath) {
+        return '/files/' + encodeURIComponent(modelDir) + '/' + relPath;
+    }
+
+    /** HTML 转义 */
+    function esc(str) {
+        if (!str) return '';
+        var d = document.createElement('div');
+        d.textContent = str;
+        return d.innerHTML;
+    }
+
+    /** 格式化时长（秒） */
+    function formatDuration(seconds) {
+        var sec = parseInt(seconds, 10);
+        if (isNaN(sec) || sec <= 0) return '';
+        var hours = sec / 3600;
+        if (hours >= 1) return hours.toFixed(1) + ' h';
+        return (sec / 60).toFixed(1) + ' min';
+    }
+
+    /** 格式化日期 */
+    function formatDate(dateStr) {
+        if (!dateStr) return '';
+        try {
+            var clean = String(dateStr).replace('Z', '+00:00');
+            var d = new Date(clean);
+            if (isNaN(d.getTime())) return dateStr;
+            return d.toISOString().slice(0, 10);
+        } catch (e) {
+            return dateStr || '';
+        }
+    }
+
+    /** 提取文件名 */
+    function toName(item) {
+        if (!item) return null;
+        var parts = String(item).replace(/\\/g, '/').split('/');
+        return parts[parts.length - 1] || null;
+    }
+
+    /** 移除命名前缀（与 archiver.py 逻辑一致） */
+    function stripPrefix(name, baseName) {
+        if (!name || !baseName) return name;
+        var prefix = baseName + '_';
+        if (name.startsWith(prefix)) {
+            return name.substring(prefix.length);
+        }
+        return name;
+    }
+
+    // ============ 数据标准化 ============
+
+    function normalizeStats(meta) {
+        var stats = meta.stats || meta.counts || {};
+        return {
+            likes: stats.likes || stats.like || 0,
+            favorites: stats.favorites || stats.favorite || 0,
+            downloads: stats.downloads || stats.download || 0,
+            prints: stats.prints || stats.print || 0,
+            views: stats.views || stats.read || stats.reads || 0,
+        };
+    }
+
+    function normalizeAuthor(meta) {
+        var a = meta.author;
+        if (typeof a === 'string') return { name: a, url: '', avatar: null };
+        if (!a || typeof a !== 'object') return { name: '', url: '', avatar: null };
+        var avatarRel = a.avatarRelPath || a.avatar_local_path || '';
+        if (!avatarRel && (a.avatarLocal || a.avatar_local)) {
+            avatarRel = 'images/' + (a.avatarLocal || a.avatar_local);
+        }
+        return {
+            name: a.name || '',
+            url: a.url || '',
+            avatar: avatarRel || null,
+        };
+    }
+
+    function normalizeImages(meta) {
+        var raw = meta.images;
+        var design = [], summary = [], cover = null;
+
+        if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+            design = (raw.design || []).map(toName).filter(Boolean);
+            summary = (raw.summary || []).map(toName).filter(Boolean);
+            cover = toName(raw.cover);
+        } else if (Array.isArray(raw)) {
+            design = raw.map(toName).filter(Boolean);
+        }
+
+        if (!design.length && meta.designImages) {
+            meta.designImages.forEach(function (item) {
+                if (typeof item === 'object') {
+                    var n = toName(item.fileName || item.localName || item.relPath);
+                    if (n) design.push(n);
+                }
+            });
+        }
+
+        if (!summary.length && meta.summaryImages) {
+            meta.summaryImages.forEach(function (item) {
+                if (typeof item === 'object') {
+                    var n = toName(item.fileName || item.relPath);
+                    if (n) summary.push(n);
+                } else if (typeof item === 'string') {
+                    var n2 = toName(item);
+                    if (n2) summary.push(n2);
+                }
+            });
+        }
+
+        if (!cover) {
+            var ci = meta.cover || {};
+            cover = toName(ci.relPath || ci.localName);
+        }
+
+        return { design: design, summary: summary, cover: cover };
+    }
+
+    // ============ 实例文件名计算 ============
+
+    function pickInstanceFilename(inst, nameHint) {
+        var baseName = inst.title || inst.name || inst.id || 'model';
+        var base = String(baseName).replace(/[\\/:*?"<>|]/g, '_');
+        if (!base) {
+            base = String(inst.id || 'model');
+        }
+        var ext = '';
+        if (nameHint && nameHint.indexOf('.') > -1) {
+            ext = '.' + nameHint.split('.').pop();
+        }
+        if (!ext) {
+            ext = '.3mf';
+        } else if (!ext.startsWith('.')) {
+            ext = '.' + ext;
+        }
+        return base + ext;
+    }
+
+    // ============ DOM 渲染 ============
+
+    var MODEL_DIR = '';
+
+    function renderTitle(meta) {
+        var el = document.getElementById('titleSection');
+        var title = esc(meta.title || '');
+        var url = meta.url || '';
+        el.innerHTML = title +
+            (url ? ' <a class="origin-link" href="' + esc(url) + '" target="_blank" rel="noreferrer">原文链接</a>' : '');
+        document.title = meta.title || '模型详情';
+    }
+
+    function renderAuthor(meta) {
+        var author = normalizeAuthor(meta);
+        var el = document.getElementById('authorSection');
+        var html = '';
+        if (author.avatar) {
+            html += '<img class="avatar" src="' + fileUrl(MODEL_DIR, author.avatar) + '" alt="avatar">';
+        }
+        html += '作者：';
+        if (author.url) {
+            html += '<a href="' + esc(author.url) + '" target="_blank" rel="noreferrer">' + esc(author.name) + '</a>';
+        } else {
+            html += esc(author.name);
+        }
+        el.innerHTML = html;
+    }
+
+    function renderHero(meta, images) {
+        var el = document.getElementById('heroImage');
+        // 优先 screenshot, 然后 cover, 然后第一张 design
+        var src = '';
+        // 尝试 screenshot（可能是 .png .jpg .webp）
+        var exts = ['png', 'jpg', 'jpeg', 'webp'];
+        for (var i = 0; i < exts.length; i++) {
+            // 我们先构建 URL，后面 onerror 处理
+            if (i === 0) src = fileUrl(MODEL_DIR, 'screenshot.png');
+        }
+        if (images.cover) {
+            // 用 cover 作为 fallback
+            el.onerror = function () {
+                this.onerror = null;
+                this.src = fileUrl(MODEL_DIR, 'images/' + images.cover);
+            };
+        } else if (images.design.length) {
+            el.onerror = function () {
+                this.onerror = null;
+                this.src = fileUrl(MODEL_DIR, 'images/' + images.design[0]);
+            };
+        }
+        el.src = src;
+    }
+
+    function renderCollectDate(meta) {
+        var el = document.getElementById('collectDate');
+        var ts = meta.collectDate; // Unix timestamp from server
+        if (!ts) {
+            el.textContent = '';
+            return;
+        }
+        var d = new Date(ts * 1000);
+        var dateStr = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        el.innerHTML = '<i class="far fa-calendar-alt"></i> 采集于 ' + dateStr;
+    }
+
+    function renderStats(meta) {
+        var isOthers = meta.source === 'others';
+        if (isOthers) return;
+        var stats = normalizeStats(meta);
+        var el = document.getElementById('statsSection');
+
+        var frags = [
+            '<div class="stat-item"><div class="stat-val">' + stats.downloads + '</div><div class="stat-lbl">下载</div></div>',
+            '<div class="stat-item"><div class="stat-val">' + stats.likes + '</div><div class="stat-lbl">点赞</div></div>',
+            '<div class="stat-item"><div class="stat-val">' + (stats.prints || '-') + '</div><div class="stat-lbl">打印</div></div>'
+        ];
+
+        var iconsHtml = '<div class="stats-icons-row">' +
+            '<span class="stat-chip" title="收藏"><i class="fas fa-star"></i> ' + stats.favorites + '</span>' +
+            '<span class="stat-chip" title="浏览"><i class="fas fa-eye"></i> ' + stats.views + '</span>' +
+            '</div>';
+
+        el.innerHTML = '<div class="stats">' + frags.join('') + '</div>' + iconsHtml;
+    }
+
+    function renderTags(meta) {
+        var tags = meta.tags || meta.tagsOriginal || [];
+        var block = document.getElementById('tagsBlock');
+        var el = document.getElementById('tagList');
+        if (!tags.length) {
+            block.classList.add('hidden');
+            el.innerHTML = '';
+            return;
+        }
+        block.classList.remove('hidden');
+        el.innerHTML = tags.map(function (t) {
+            return '<span>' + esc(t) + '</span>';
+        }).join('\n');
+    }
+
+    function renderSummary(meta) {
+        var s = meta.summary || {};
+        var html = s.html || s.raw || '';
+        // 移除翻译文本
+        html = html.replace(/<div[^>]*class="[^"]*translated-text[^"]*"[^>]*>.*?<\/div>/gis, '');
+        // 修正 summary 中的图片路径 — 如果 src 是相对路径则映射到 /files/{modelDir}/images/
+        html = html.replace(/src="(?!https?:\/\/|\/)(.*?)"/g, function (match, p1) {
+            return 'src="' + fileUrl(MODEL_DIR, 'images/' + toName(p1)) + '"';
+        });
+        document.getElementById('summaryContent').innerHTML = html;
+    }
+
+    // ============ 实例卡片 ============
+
+    function buildInstanceHtml(inst, baseName) {
+        var title = inst.title || inst.name || '实例 ' + (inst.id || '');
+        var publish = formatDate(inst.publishTime || '');
+        var summary = inst.summary || '';
+        var dls = inst.downloadCount || 0;
+        var prints = inst.printCount || 0;
+        var weight = inst.weight || '';
+        var prediction = inst.prediction;
+        var timeStr = prediction ? formatDuration(prediction) : '';
+        var plates = inst.plates || [];
+        var plateCnt = plates.length;
+        var pictures = inst.pictures || [];
+        var filaments = inst.instanceFilaments || [];
+
+        var fileName = pickInstanceFilename(inst, inst.name || '');
+        var dlHrefLocal = fileUrl(MODEL_DIR, 'instances/' + fileName);
+
+        function toHex(str) {
+            var utf8Str = unescape(encodeURIComponent(str));
+            var hex = '';
+            for (var i = 0; i < utf8Str.length; i++) {
+                var h = utf8Str.charCodeAt(i).toString(16);
+                if (h.length === 1) h = '0' + h;
+                hex += h;
+            }
+            return hex;
+        }
+        var rawRelPath = MODEL_DIR + '/instances/' + fileName;
+        var bambuProxyUrl = window.location.origin + '/api/bambu/download/' + toHex(rawRelPath) + '.3mf';
+
+        // 耗材 chips
+        var chipsHtml = '';
+        if (filaments.length) {
+            var chips = filaments.map(function (f) {
+                var typ = f.type || '';
+                var usedG = f.usedG || f.usedg || '';
+                var col = f.color || '';
+                var dot = col ? '<span class="color-dot" style="background:' + esc(col) + '"></span>' : '';
+                return '<span class="chip">' + dot + esc(typ) + ' ' + usedG + 'g</span>';
+            });
+            chipsHtml = '<div class="chips">' + chips.join('\n') + '</div>';
+        }
+
+        // 盘片弹窗使用的详细 HTML
+        var platesDataHtml = '';
+        if (plates.length) {
+            platesDataHtml = plates.map(function (p) {
+                var th = toName(p.thumbnailRelPath || '');
+                var localTh = stripPrefix(th, baseName);
+                var pred = p.prediction ? formatDuration(p.prediction) : '';
+                var w = p.weight ? p.weight + ' g' : '';
+
+                var fs = p.filaments || [];
+                var fsHtml = '';
+                if (fs.length) {
+                    fsHtml = '<div class="plate-row-filaments">' + fs.map(function (f) {
+                        var col = f.color ? '<span class="color-dot" style="background:' + esc(f.color) + ';width:12px;height:12px;margin-right:4px;"></span>' : '';
+                        return '<span class="chip" style="font-size:12px;">' + col + esc(f.type || '') + ' | ' + (f.usedG || f.usedg || '') + ' g</span>';
+                    }).join('') + '</div>';
+                }
+
+                var imgSrc = localTh ? fileUrl(MODEL_DIR, 'images/' + localTh) : '';
+                var spoolIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: text-bottom; margin-right: 4px;"><path d="M4.5 12c0-4.142 1.567-7.5 3.5-7.5s3.5 3.358 3.5 7.5-1.567 7.5-3.5 7.5-3.5-3.358-3.5-7.5z"/><path d="M11 4.5h5c1.933 0 3.5 3.358 3.5 7.5s-1.567 7.5-3.5 7.5h-5"/><circle cx="8" cy="12" r="1.5"/></svg>';
+                return '<div class="plate-row">' +
+                    '<div class="plate-row-img">' +
+                    '<div class="p-index">盘 ' + (p.index || '') + '</div>' +
+                    (imgSrc ? '<img src="' + imgSrc + '" alt="plate ' + p.index + '">' : '') +
+                    '</div>' +
+                    '<div class="plate-row-info">' +
+                    '<div class="plate-row-stats">' +
+                    (pred ? '<span><i class="far fa-clock"></i> ' + pred + '</span>' : '') +
+                    (w ? '<span>' + spoolIcon + w + '</span>' : '') +
+                    '</div>' +
+                    fsHtml +
+                    '</div>' +
+                    '</div>';
+            }).join('').replace(/"/g, '&quot;'); // 转义双引号以便存入 data 属性
+        }
+
+        // 实例配图
+        var picsHtml = '';
+        if (pictures.length) {
+            var imgs = pictures.map(function (pic) {
+                var rel = stripPrefix(toName(pic.relPath || ''), baseName);
+                if (!rel) return '';
+                return '<img class="inst-thumb zoomable" src="' + fileUrl(MODEL_DIR, 'images/' + rel) + '" alt="pic ' + (pic.index || '') + '" style="width:80px;height:80px;object-fit:cover;border-radius:4px;cursor:zoom-in;">';
+            }).filter(Boolean);
+            if (imgs.length) picsHtml = '<div class="thumbs" style="padding:0;background:transparent;">' + imgs.join('') + '</div>';
+        }
+
+        // 统计（others 来源隐藏）
+        var statsHtml = '<div class="inst-meta">' +
+            '<span class="meta-item" title="下载次数"><i class="fas fa-download"></i> ' + dls + '</span>' +
+            '<span class="meta-item" title="打印次数"><i class="fas fa-print"></i> ' + prints + '</span>' +
+            '<span class="meta-item" title="预计打印时间"><i class="far fa-clock"></i> ' + timeStr + '</span>' +
+            '<span class="meta-item" title="重量"><i class="fas fa-weight-hanging"></i> ' + weight + ' g</span>' +
+            '</div>';
+
+        return '<div class="inst-card">' +
+            '<div class="inst-header">' +
+            '<div class="inst-title-area">' +
+            '<strong>' + esc(title) + '</strong>' +
+            '<span class="inst-publish">' + (publish ? publish : '') +
+            (plateCnt ? '<span class="meta-badge" style="margin-left:8px;"><i class="fas fa-puzzle-piece"></i> ' + plateCnt + ' 盘</span>' : '') +
+            '</span>' +
+            '</div>' +
+            (dlHrefLocal ? '<div class="inst-actions">' +
+                (platesDataHtml ? '<button class="inst-btn btn-outline" style="white-space: nowrap;" onclick="openPlatesModal(this)" data-plates="' + platesDataHtml + '"><i class="fas fa-list"></i> 详情</button>' : '') +
+                '<a class="inst-btn inst-bambu" style="white-space: nowrap;" href="bambustudio://open?file=' + bambuProxyUrl + '" title="在 Bambu Studio 中打开"><i class="fas fa-cube"></i> 打印</a>' +
+                '<a class="inst-btn inst-local" style="white-space: nowrap;" href="' + dlHrefLocal + '" target="_blank" rel="noreferrer" title="下载资源"><i class="fas fa-download"></i> 下载</a>' +
+                '</div>' : '') +
+            '</div>' +
+            statsHtml +
+            chipsHtml +
+            picsHtml +
+            (summary ? '<div style="margin-top:12px;font-size:13px;color:var(--text-secondary);">' + summary + '</div>' : '') +
+            '</div>';
+    }
+
+    function renderInstances(meta) {
+        var instances = meta.instances || [];
+        var el = document.getElementById('instanceList');
+        if (!instances.length) { el.innerHTML = ''; return; }
+        el.innerHTML = instances.map(function (inst) {
+            return buildInstanceHtml(inst, meta.baseName);
+        }).join('\n');
+    }
+
+    // ============ 设计图轮播 ============
+
+    function renderCarousel(images) {
+        var designImgs = images.design || [];
+        var el = document.getElementById('carouselSection');
+        if (!designImgs.length) { el.innerHTML = ''; return; }
+
+        var imgTags = designImgs.map(function (fn) {
+            return '<img src="' + fileUrl(MODEL_DIR, 'images/' + fn) + '" alt="design image">';
+        }).join('\n');
+
+        var thumbTags = designImgs.map(function (fn, i) {
+            return '<img data-idx="' + i + '" src="' + fileUrl(MODEL_DIR, 'images/' + fn) + '" alt="thumb ' + (i + 1) + '">';
+        }).join('\n');
+
+        el.innerHTML =
+            '<div class="carousel" id="designCarousel">' +
+            '<div class="carousel-track">' + imgTags + '</div>' +
+            '<button class="carousel-btn prev" type="button">◀</button>' +
+            '<button class="carousel-btn next" type="button">▶</button>' +
+            '</div>' +
+            '<div class="thumbs" id="designThumbs">' + thumbTags + '</div>';
+
+        initCarousel();
+    }
+
+    function initCarousel() {
+        var carousel = document.getElementById('designCarousel');
+        if (!carousel) return;
+        var track = carousel.querySelector('.carousel-track');
+        var slides = carousel.querySelectorAll('.carousel-track > img');
+        var prevBtn = carousel.querySelector('.prev');
+        var nextBtn = carousel.querySelector('.next');
+        var thumbs = document.querySelectorAll('#designThumbs img');
+        if (!track || slides.length === 0) return;
+
+        var index = 0;
+        function update() {
+            var width = carousel.clientWidth;
+            track.style.transform = 'translateX(' + (-index * width) + 'px)';
+            thumbs.forEach(function (t, i) {
+                if (i === index) t.classList.add('active');
+                else t.classList.remove('active');
+            });
+        }
+        function go(delta) {
+            index = (index + delta + slides.length) % slides.length;
+            update();
+        }
+        window.addEventListener('resize', update);
+        prevBtn.addEventListener('click', function () { go(-1); });
+        nextBtn.addEventListener('click', function () { go(1); });
+        thumbs.forEach(function (t, i) {
+            t.addEventListener('click', function () {
+                index = i;
+                update();
+            });
+        });
+        update();
+    }
+
+    // ============ 灯箱 ============
+
+    function initLightbox() {
+        var overlay = document.getElementById('imgLightbox');
+        var overlayImg = overlay ? overlay.querySelector('img') : null;
+        if (!overlay || !overlayImg) return;
+
+        var currentImages = [];
+        var currentIndex = -1;
+
+        function showImage(index) {
+            if (currentImages.length === 0) return;
+            if (index < 0) index = currentImages.length - 1;
+            if (index >= currentImages.length) index = 0;
+            currentIndex = index;
+            overlayImg.src = currentImages[currentIndex].src;
+        }
+
+        document.addEventListener('click', function (e) {
+            var target = e.target;
+
+            // Handle lightbox navigation arrows
+            if (target.closest('.lb-prev')) {
+                e.preventDefault();
+                showImage(currentIndex - 1);
+                return;
+            }
+            if (target.closest('.lb-next')) {
+                e.preventDefault();
+                showImage(currentIndex + 1);
+                return;
+            }
+
+            if (!(target instanceof HTMLImageElement)) return;
+            if (!target.classList.contains('zoomable')) return;
+
+            currentImages = Array.from(document.querySelectorAll('img.zoomable'));
+            currentIndex = currentImages.indexOf(target);
+            if (currentIndex === -1) {
+                currentImages.push(target);
+                currentIndex = currentImages.length - 1;
+            }
+
+            overlayImg.src = target.src;
+            overlay.classList.add('show');
+        });
+
+        overlay.addEventListener('click', function (e) {
+            // Close if clicked outside arrows or image
+            if (e.target === overlay || e.target === overlayImg) {
+                overlay.classList.remove('show');
+                overlayImg.src = '';
+            }
+        });
+
+        // Keyboard arrows support
+        document.addEventListener('keydown', function (e) {
+            if (!overlay.classList.contains('show')) return;
+            if (e.key === 'ArrowLeft') showImage(currentIndex - 1);
+            else if (e.key === 'ArrowRight') showImage(currentIndex + 1);
+            else if (e.key === 'Escape') {
+                overlay.classList.remove('show');
+                overlayImg.src = '';
+            }
+        });
+    }
+
+    // ============ 附件 ============
+
+    function initAttachments() {
+        var listEl = document.getElementById('attachList');
+        var msgEl = document.getElementById('attachMsg');
+        var inputEl = document.getElementById('attachInput');
+        var btnEl = document.getElementById('attachUploadBtn');
+        if (!listEl) return;
+
+        function setMsg(text, isError) {
+            if (!msgEl) return;
+            msgEl.textContent = text || '';
+            if (isError) msgEl.classList.add('error');
+            else msgEl.classList.remove('error');
+        }
+
+        function renderList(files) {
+            listEl.innerHTML = '';
+            if (!files || !files.length) {
+                var li = document.createElement('li');
+                li.className = 'attach-empty';
+                li.textContent = '暂无附件';
+                listEl.appendChild(li);
+                return;
+            }
+            files.forEach(function (name) {
+                var li = document.createElement('li');
+                var link = document.createElement('a');
+                link.href = fileUrl(MODEL_DIR, 'file/' + encodeURIComponent(name));
+                link.textContent = name;
+                link.setAttribute('download', name);
+                li.appendChild(link);
+                listEl.appendChild(li);
+            });
+        }
+
+        function loadList() {
+            fetch('/api/models/' + encodeURIComponent(MODEL_DIR) + '/attachments')
+                .then(function (res) { return res.ok ? res.json() : Promise.reject(res.status); })
+                .then(function (data) {
+                    renderList((data && data.files) || []);
+                    setMsg('');
+                })
+                .catch(function () {
+                    renderList([]);
+                    setMsg('附件列表加载失败', true);
+                });
+        }
+        loadList();
+
+        if (!btnEl || !inputEl) return;
+        btnEl.addEventListener('click', async function () {
+            var files = inputEl.files ? Array.from(inputEl.files) : [];
+            if (!files.length) { setMsg('请选择附件', true); return; }
+            btnEl.disabled = true;
+            var success = 0, failed = 0;
+            setMsg('上传中... (0/' + files.length + ')');
+            for (var fi = 0; fi < files.length; fi++) {
+                var fd = new FormData();
+                fd.append('file', files[fi]);
+                try {
+                    var res = await fetch('/api/models/' + encodeURIComponent(MODEL_DIR) + '/attachments', {
+                        method: 'POST', body: fd,
+                    });
+                    if (!res.ok) throw new Error('upload failed');
+                    success++;
+                } catch (e) { failed++; }
+                setMsg('上传中... (' + (success + failed) + '/' + files.length + ')');
+            }
+            inputEl.value = '';
+            loadList();
+            if (failed === 0) setMsg('上传成功');
+            else if (success === 0) setMsg('上传失败', true);
+            else setMsg('部分成功 ' + success + '/' + files.length, true);
+            btnEl.disabled = false;
+        });
+    }
+
+    // ============ 打印成品 ============
+
+    function initPrinted() {
+        var listEl = document.getElementById('printedList');
+        var msgEl = document.getElementById('printedMsg');
+        var inputEl = document.getElementById('printedInput');
+        var btnEl = document.getElementById('printedUploadBtn');
+        if (!listEl) return;
+
+        function setMsg(text, isError) {
+            if (!msgEl) return;
+            msgEl.textContent = text || '';
+            if (isError) msgEl.classList.add('error');
+            else msgEl.classList.remove('error');
+        }
+
+        function renderList(files) {
+            listEl.innerHTML = '';
+            if (!files || !files.length) {
+                var empty = document.createElement('div');
+                empty.className = 'printed-empty';
+                empty.textContent = '暂无图片';
+                listEl.appendChild(empty);
+                return;
+            }
+            files.forEach(function (name) {
+                var item = document.createElement('div');
+                item.className = 'printed-item';
+                var img = document.createElement('img');
+                img.className = 'zoomable';
+                img.src = fileUrl(MODEL_DIR, 'printed/' + encodeURIComponent(name));
+                img.alt = name;
+                var caption = document.createElement('div');
+                caption.className = 'printed-caption';
+                caption.textContent = name;
+                item.appendChild(img);
+                item.appendChild(caption);
+                listEl.appendChild(item);
+            });
+        }
+
+        function loadList() {
+            fetch('/api/models/' + encodeURIComponent(MODEL_DIR) + '/printed')
+                .then(function (res) { return res.ok ? res.json() : Promise.reject(res.status); })
+                .then(function (data) {
+                    renderList((data && data.files) || []);
+                    setMsg('');
+                })
+                .catch(function () {
+                    renderList([]);
+                    setMsg('图片列表加载失败', true);
+                });
+        }
+        loadList();
+
+        if (!btnEl || !inputEl) return;
+        btnEl.addEventListener('click', async function () {
+            var files = inputEl.files ? Array.from(inputEl.files) : [];
+            if (!files.length) { setMsg('请选择图片', true); return; }
+            btnEl.disabled = true;
+            var success = 0, failed = 0;
+            setMsg('上传中... (0/' + files.length + ')');
+            for (var fi = 0; fi < files.length; fi++) {
+                var fd = new FormData();
+                fd.append('file', files[fi]);
+                try {
+                    var res = await fetch('/api/models/' + encodeURIComponent(MODEL_DIR) + '/printed', {
+                        method: 'POST', body: fd,
+                    });
+                    if (!res.ok) throw new Error('upload failed');
+                    success++;
+                } catch (e) { failed++; }
+                setMsg('上传中... (' + (success + failed) + '/' + files.length + ')');
+            }
+            inputEl.value = '';
+            loadList();
+            if (failed === 0) setMsg('上传成功');
+            else if (success === 0) setMsg('上传失败', true);
+            else setMsg('部分成功 ' + success + '/' + files.length, true);
+            btnEl.disabled = false;
+        });
+    }
+
+    // ============ 主入口 ============
+
+    async function main() {
+        MODEL_DIR = getModelDir();
+        if (!MODEL_DIR) {
+            showError('无法从 URL 解析模型目录');
+            return;
+        }
+
+        try {
+            var res = await fetch('/api/v2/models/' + encodeURIComponent(MODEL_DIR) + '/meta');
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            var meta = await res.json();
+
+            var images = normalizeImages(meta);
+
+            // 渲染各区域
+            renderTitle(meta);
+            renderAuthor(meta);
+            renderHero(meta, images);
+            renderCollectDate(meta);
+            renderStats(meta);
+            renderTags(meta);
+            renderInstances(meta);
+            renderCarousel(images);
+            renderSummary(meta);
+
+            // 显示主内容，隐藏加载状态
+            document.getElementById('loadingState').classList.add('hidden');
+            document.getElementById('mainContent').classList.remove('hidden');
+
+            // 初始化交互
+            initLightbox();
+            initAttachments();
+            initPrinted();
+        } catch (e) {
+            showError('加载模型数据失败：' + e.message);
+        }
+    }
+
+    function showError(msg) {
+        document.getElementById('loadingState').classList.add('hidden');
+        var el = document.getElementById('errorState');
+        el.textContent = msg;
+        el.classList.remove('hidden');
+    }
+
+    // 启动
+    /* 分盘弹窗控制逻辑 */
+    window.openPlatesModal = function (btn) {
+        var platesHtml = btn.getAttribute('data-plates');
+        var modal = document.getElementById('platesModal');
+        var body = document.getElementById('platesModalBody');
+        var preview = document.getElementById('platesModalPreview');
+        body.innerHTML = platesHtml;
+        modal.classList.add('active');
+
+        // 初始化侧边栏交互逻辑
+        var rows = body.querySelectorAll('.plate-row');
+        function selectRow(row) {
+            rows.forEach(r => r.classList.remove('active'));
+            row.classList.add('active');
+            var img = row.querySelector('.plate-row-img img');
+            if (img) {
+                preview.innerHTML = '<img src="' + img.src + '" alt="preview">';
+            } else {
+                preview.innerHTML = '<div style="color:#666;">暂无预览</div>';
+            }
+        }
+
+        rows.forEach(function (row) {
+            row.addEventListener('click', function () {
+                selectRow(this);
+            });
+        });
+
+        // 默认选中第一项
+        if (rows.length > 0) {
+            selectRow(rows[0]);
+        } else {
+            preview.innerHTML = '';
+        }
+    };
+
+    document.getElementById('platesModalClose').addEventListener('click', function () {
+        document.getElementById('platesModal').classList.remove('active');
+    });
+
+    document.getElementById('platesModal').addEventListener('click', function (e) {
+        if (e.target === this) {
+            this.classList.remove('active');
+        }
+    });
+
+    // 页面主入口
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', main);
+    } else {
+        main();
+    }
+})();

@@ -741,6 +741,30 @@ async def api_redownload_missing():
         raise HTTPException(500, f"重试下载失败: {e}")
 
 
+@app.get("/api/bambu/download/{hex_path}.3mf")
+async def api_bambu_download(hex_path: str):
+    import urllib.parse
+    logger.info(f"Bambu Studio 请求下载 (Hex的路径): {hex_path}")
+    try:
+        rel_path = bytes.fromhex(hex_path).decode('utf-8')
+    except Exception:
+        logger.error("Hex 路径解码失败")
+        raise HTTPException(400, "无效的文件路径编码")
+        
+    full_path = Path(CFG["download_dir"]) / rel_path
+    if not full_path.is_file():
+        logger.error(f"找不到文件: {full_path}")
+        raise HTTPException(404, "找不到对应的打印配置或者模型文件")
+        
+    filename = full_path.name
+    encoded_filename = urllib.parse.quote(filename)
+    logger.info(f"成功提供文件: {filename}")
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
+    }
+    return FileResponse(full_path, headers=headers)
+
+
 @app.post("/api/instances/{inst_id}/redownload")
 async def api_redownload_instance(inst_id: int):
     cookie = read_cookie(CFG)
@@ -1093,5 +1117,29 @@ async def api_delete_model(model_dir: str):
     return {"status": "ok"}
 
 
+# ---------- v2: 模板渲染模型详情页（测试） ----------
+
+@app.get("/v2/files/{model_dir}")
+async def v2_model_page(model_dir: str):
+    """返回通用模型详情页模板，由前端 JS 动态加载 meta.json 渲染"""
+    resolve_model_dir(model_dir)  # 校验目录合法性
+    return FileResponse(BASE_DIR / "templates" / "model.html")
+
+
+@app.get("/api/v2/models/{model_dir}/meta")
+async def api_v2_model_meta(model_dir: str):
+    """返回模型目录下的 meta.json"""
+    target = resolve_model_dir(model_dir)
+    meta_path = target / "meta.json"
+    if not meta_path.exists():
+        raise HTTPException(404, "meta.json 不存在")
+    try:
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+        data["collectDate"] = int(meta_path.stat().st_mtime)
+        return data
+    except Exception as e:
+        raise HTTPException(500, f"读取 meta.json 失败: {e}")
+
+
 if __name__ == "__main__":
-    uvicorn.run("server:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)

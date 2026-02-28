@@ -494,3 +494,173 @@ header {
   margin-right: 8px;
   color: var(--color-primary);
 }
+
+/* V1/V2 Toggle Button */
+.btn-v2-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  background: #fff;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.btn-v2-toggle:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: #f0f7ff;
+}
+
+.btn-v2-toggle.active {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-primary);
+}
+
+.btn-v2-toggle.active:hover {
+  background: #1565c0;
+  border-color: #1565c0;
+}
+
+/* =========================================
+   Mobile Responsiveness (H5)
+========================================= */
+@media (max-width: 992px) {
+
+  /* Header */
+  header {
+    padding: 15px;
+    /* Equal 15px padding all around */
+    height: auto;
+    /* Allow auto height based on padding */
+    min-height: 60px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .brand h1 {
+    font-size: 16px;
+  }
+
+  .brand {
+    min-width: auto;
+  }
+
+  .header-search {
+    display: none;
+    /* Hide search bar on mobile for simplicity, or we can move it into a menu */
+  }
+
+  .header-actions {
+    min-width: auto;
+    gap: 8px;
+  }
+
+  /* Main Layout */
+  .layout {
+    flex-direction: column;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    width: 100%;
+    height: auto;
+    position: static;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+    padding: 16px;
+    display: block;
+    /* Use block to ensure it auto-expands height */
+  }
+
+  /* Hide all sidebar sections except the first one (Source) */
+  .sidebar>.side-title:not(:first-child),
+  .sidebar>.side-menu:not(:nth-of-type(2)) {
+    display: none;
+  }
+
+  .sidebar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .side-menu {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    /* Wrap menu items */
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .side-item {
+    width: auto;
+    padding: 6px 12px;
+    white-space: nowrap;
+    margin: 0;
+  }
+
+  .side-title {
+    margin: 0 0 12px 0;
+    white-space: nowrap;
+    width: 100%;
+    display: block;
+  }
+
+  .side-title:first-child {
+    margin-top: 0;
+  }
+
+  /* Content */
+  .content {
+    padding: 16px;
+    height: auto;
+    min-height: calc(100vh - 60px - 60px);
+    /* Approx */
+  }
+
+  /* Toolbar */
+  .toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .sort-order {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  /* Grid */
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 16px;
+  }
+
+  .card-cover {
+    aspect-ratio: 1 / 1;
+  }
+
+  .card-body {
+    padding: 10px;
+  }
+
+  .title {
+    font-size: 14px;
+  }
+
+  .author-name {
+    max-width: 80px;
+  }
+
+  .stat-chip {
+    font-size: 11px;
+  }
+}
