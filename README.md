@@ -81,8 +81,18 @@ docker run -d \
   -v $PWD/app/data:/app/data \
   -v $PWD/app/logs:/app/logs \
   -v $PWD/app/cookie.txt:/app/cookie.txt \
-  mw-archiver:latest
+  sonicming/mw-archiver:latest
 ```
+
+### Docker 参数详细说明
+
+* **`-d`**：后台运行容器（detach 模式），容器启动后不会阻塞当前终端。
+* **`--name mw-archiver`**：为容器指定一个自定义名称标识（即 `mw-archiver`），方便后续使用 `docker logs mw-archiver` 或 `docker stop mw-archiver` 进行管理。
+* **`-p 8000:8000`**：端口映射，格式为 `宿主机端口:容器内端口`。将容器内部的 `8000` 端口映射给宿主机的 `8000` 端口，启动后即可通过 `http://localhost:8000` 访问网页服务。
+* **`-v $PWD/app/data:/app/data`**：数据目录映射（Volume）。将宿主机当前目录下的 `app/data` 挂载到容器内的 `/app/data`，使得所有归档下载的模型（3MF 文件、图片等数据）持久化保存在宿主机中，**防止容器重启或重建时数据丢失**。
+* **`-v $PWD/app/logs:/app/logs`**：日志目录映射。将运行日志和错误信息（如缺失 3MF 的记录日志）保存到宿主机，方便排查使用。
+* **`-v $PWD/app/cookie.txt:/app/cookie.txt`**：Cookie 凭证文件映射。此文件用于 MakerWorld 下载模型所需的认证信息。挂载出来便于配置持久化（即使在网页后端自动更新或重写了它的内容，宿主机上的文件也会同步更新）。*[注意：在首次执行 docker run 之前，如果 `app/cookie.txt` 在宿主机不存在，可能会被 Docker 错误识别并创建为目录，可以先在本地执行 `touch app/cookie.txt` 创建空文件]*。
+* **`sonicming/mw-archiver:latest`**：启动使用的 Docker 镜像名称以及对应的版本标签（latest）。
 
 ## 配置说明
 配置文件为 [app/config.json](app/config.json)：
