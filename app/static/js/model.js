@@ -15,6 +15,11 @@
         if (idx >= 0 && parts[idx + 1] === 'files' && parts.length > idx + 2) {
             return decodeURIComponent(parts[idx + 2]);
         }
+        // 路由: /files/{modelDir}/index.html
+        var filesIdx = parts.indexOf('files');
+        if (filesIdx >= 0 && parts.length > filesIdx + 1) {
+            return decodeURIComponent(parts[filesIdx + 1]);
+        }
         return '';
     }
 
@@ -165,6 +170,77 @@
     // ============ DOM 渲染 ============
 
     var MODEL_DIR = '';
+    var OFFLINE_API_BASE_KEY = 'mw_offline_api_base';
+    var DEFAULT_OFFLINE_API_BASE = 'http://127.0.0.1:8000';
+
+    function normalizeApiBase(raw) {
+        var v = String(raw || '').trim();
+        if (!v) return '';
+        return v.replace(/\/+$/, '');
+    }
+
+    function getOfflineApiBase() {
+        var fromQuery = '';
+        var fromMeta = '';
+        var fromStorage = '';
+
+        try {
+            var q = new URLSearchParams(location.search || '');
+            fromQuery = normalizeApiBase(q.get('apiBase') || '');
+        } catch (_) {}
+
+        try {
+            var m = window.__OFFLINE_META__ || {};
+            fromMeta = normalizeApiBase(m.apiBase || m.api_base || '');
+        } catch (_) {}
+
+        try {
+            fromStorage = normalizeApiBase(localStorage.getItem(OFFLINE_API_BASE_KEY) || '');
+        } catch (_) {}
+
+        var chosen = fromQuery || fromMeta || fromStorage || DEFAULT_OFFLINE_API_BASE;
+        chosen = normalizeApiBase(chosen);
+        try {
+            if (chosen) localStorage.setItem(OFFLINE_API_BASE_KEY, chosen);
+        } catch (_) {}
+        return chosen;
+    }
+
+    function apiUrl(path) {
+        var p = String(path || '');
+        if (location.protocol === 'file:') {
+            var base = getOfflineApiBase();
+            return base ? (base + p) : p;
+        }
+        return p;
+    }
+
+    function canUseBackendApi() {
+        if (!MODEL_DIR) return false;
+        if (location.protocol === 'file:') return false;
+        return true;
+    }
+
+    function getOfflineFileList(kind) {
+        try {
+            var meta = window.__OFFLINE_META__ || {};
+            var offline = meta.offlineFiles || {};
+            var arr = null;
+            if (kind === 'attachments') {
+                if (Array.isArray(offline.attachments)) arr = offline.attachments;
+                else if (Array.isArray(meta.attachments)) arr = meta.attachments;
+                else if (Array.isArray(meta.attachmentFiles)) arr = meta.attachmentFiles;
+            } else if (kind === 'printed') {
+                if (Array.isArray(offline.printed)) arr = offline.printed;
+                else if (Array.isArray(meta.printed)) arr = meta.printed;
+                else if (Array.isArray(meta.printedFiles)) arr = meta.printedFiles;
+            }
+            if (!Array.isArray(arr)) return null;
+            return arr.filter(function (x) { return typeof x === 'string' && x.trim(); });
+        } catch (_) {
+            return null;
+        }
+    }
 
     function renderTitle(meta) {
         var el = document.getElementById('titleSection');
@@ -570,13 +646,47 @@
         }
 
         function loadList() {
-            fetch('/api/models/' + encodeURIComponent(MODEL_DIR) + '/attachments')
+            function loadFromLocalIndex() {
+                var metaList = getOfflineFileList('attachments');
+                if (metaList !== null) {
+                    renderList(metaList);
+                    setMsg('离线模式：已从页面元数据加载附件');
+                    return;
+                }
+                fetch('./file/_index.json')
+                    .then(function (res) { return res.ok ? res.json() : Promise.reject(res.status); })
+                    .then(function (data) {
+                        renderList((data && data.files) || []);
+                        setMsg('离线模式：已从本地清单加载附件');
+                    })
+                    .catch(function () {
+                        renderList([]);
+                        setMsg('离线模式未找到附件清单（_index.json）', true);
+                    });
+            }
+            if (location.protocol === 'file:') {
+                var quickMetaList = getOfflineFileList('attachments');
+                if (quickMetaList !== null) {
+                    renderList(quickMetaList);
+                    setMsg('离线模式：已从页面元数据加载附件');
+                    return;
+                }
+            }
+            if (!canUseBackendApi()) {
+                loadFromLocalIndex();
+                return;
+            }
+            fetch(apiUrl('/api/models/' + encodeURIComponent(MODEL_DIR) + '/attachments'))
                 .then(function (res) { return res.ok ? res.json() : Promise.reject(res.status); })
                 .then(function (data) {
                     renderList((data && data.files) || []);
                     setMsg('');
                 })
                 .catch(function () {
+                    if (location.protocol === 'file:') {
+                        loadFromLocalIndex();
+                        return;
+                    }
                     renderList([]);
                     setMsg('附件列表加载失败', true);
                 });
@@ -585,6 +695,10 @@
 
         if (!btnEl || !inputEl) return;
         btnEl.addEventListener('click', async function () {
+            if (!canUseBackendApi()) {
+                setMsg('当前页面不支持上传，请通过本地服务地址访问', true);
+                return;
+            }
             var files = inputEl.files ? Array.from(inputEl.files) : [];
             if (!files.length) { setMsg('请选择附件', true); return; }
             btnEl.disabled = true;
@@ -594,7 +708,7 @@
                 var fd = new FormData();
                 fd.append('file', files[fi]);
                 try {
-                    var res = await fetch('/api/models/' + encodeURIComponent(MODEL_DIR) + '/attachments', {
+                    var res = await fetch(apiUrl('/api/models/' + encodeURIComponent(MODEL_DIR) + '/attachments'), {
                         method: 'POST', body: fd,
                     });
                     if (!res.ok) throw new Error('upload failed');
@@ -653,13 +767,47 @@
         }
 
         function loadList() {
-            fetch('/api/models/' + encodeURIComponent(MODEL_DIR) + '/printed')
+            function loadFromLocalIndex() {
+                var metaList = getOfflineFileList('printed');
+                if (metaList !== null) {
+                    renderList(metaList);
+                    setMsg('离线模式：已从页面元数据加载图片');
+                    return;
+                }
+                fetch('./printed/_index.json')
+                    .then(function (res) { return res.ok ? res.json() : Promise.reject(res.status); })
+                    .then(function (data) {
+                        renderList((data && data.files) || []);
+                        setMsg('离线模式：已从本地清单加载图片');
+                    })
+                    .catch(function () {
+                        renderList([]);
+                        setMsg('离线模式未找到图片清单（_index.json）', true);
+                    });
+            }
+            if (location.protocol === 'file:') {
+                var quickMetaList = getOfflineFileList('printed');
+                if (quickMetaList !== null) {
+                    renderList(quickMetaList);
+                    setMsg('离线模式：已从页面元数据加载图片');
+                    return;
+                }
+            }
+            if (!canUseBackendApi()) {
+                loadFromLocalIndex();
+                return;
+            }
+            fetch(apiUrl('/api/models/' + encodeURIComponent(MODEL_DIR) + '/printed'))
                 .then(function (res) { return res.ok ? res.json() : Promise.reject(res.status); })
                 .then(function (data) {
                     renderList((data && data.files) || []);
                     setMsg('');
                 })
                 .catch(function () {
+                    if (location.protocol === 'file:') {
+                        loadFromLocalIndex();
+                        return;
+                    }
                     renderList([]);
                     setMsg('图片列表加载失败', true);
                 });
@@ -668,6 +816,10 @@
 
         if (!btnEl || !inputEl) return;
         btnEl.addEventListener('click', async function () {
+            if (!canUseBackendApi()) {
+                setMsg('当前页面不支持上传，请通过本地服务地址访问', true);
+                return;
+            }
             var files = inputEl.files ? Array.from(inputEl.files) : [];
             if (!files.length) { setMsg('请选择图片', true); return; }
             btnEl.disabled = true;
@@ -677,7 +829,7 @@
                 var fd = new FormData();
                 fd.append('file', files[fi]);
                 try {
-                    var res = await fetch('/api/models/' + encodeURIComponent(MODEL_DIR) + '/printed', {
+                    var res = await fetch(apiUrl('/api/models/' + encodeURIComponent(MODEL_DIR) + '/printed'), {
                         method: 'POST', body: fd,
                     });
                     if (!res.ok) throw new Error('upload failed');
@@ -700,7 +852,7 @@
         var meta;
         if (window.__OFFLINE_META__) {
             meta = window.__OFFLINE_META__;
-            MODEL_DIR = meta.dir || '';
+            MODEL_DIR = meta.dir || meta.baseName || getModelDir();
         } else {
             MODEL_DIR = getModelDir();
             if (!MODEL_DIR) {
@@ -709,7 +861,7 @@
             }
 
             try {
-                var res = await fetch('/api/v2/models/' + encodeURIComponent(MODEL_DIR) + '/meta');
+                var res = await fetch(apiUrl('/api/v2/models/' + encodeURIComponent(MODEL_DIR) + '/meta'));
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 meta = await res.json();
             } catch (e) {
@@ -741,8 +893,8 @@
             initAttachments();
             initPrinted();
 
-            // 离线环境隐藏上传入口区块
-            if (window.__OFFLINE_META__) {
+            // 仅在 file:// 直开且无法调用本地 API 时隐藏上传区块
+            if (!canUseBackendApi()) {
                 var attachUpload = document.getElementById('attachUploadBtn');
                 var printedUpload = document.getElementById('printedUploadBtn');
                 if (attachUpload && attachUpload.parentElement) attachUpload.parentElement.style.display = 'none';

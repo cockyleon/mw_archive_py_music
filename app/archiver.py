@@ -876,6 +876,10 @@ def build_meta(design: dict, summary: dict, design_images: List[dict], cover_met
             "text": summary.get("text", ""),
         },
         "instances": instances,
+        "offlineFiles": {
+            "attachments": [],
+            "printed": [],
+        },
         "update_time": update_time,
         "generatedAt": Path().absolute().as_posix(),
         "note": "本文件包含结构化数据与打印配置详情。",
@@ -1546,6 +1550,20 @@ def build_index_html(meta: dict, assets: dict = None) -> str:
 
     with model_js_path.open("r", encoding="utf-8") as f:
         model_js = f.read()
+
+    # 离线归档页移除外部依赖（favicon/static、FontAwesome CDN）
+    html = re.sub(
+        r'<link[^>]*rel=["\']icon["\'][^>]*>\s*',
+        "",
+        html,
+        flags=re.I,
+    )
+    html = re.sub(
+        r'<link[^>]*href=["\']https?://[^"\']*font-awesome[^"\']*["\'][^>]*>\s*',
+        "",
+        html,
+        flags=re.I,
+    )
 
     # 内联 CSS（宽松匹配属性顺序/单双引号）
     variables_inline = f"<style>\n{variables_css}\n</style>"

@@ -36,6 +36,7 @@ import argparse
 import json
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 
@@ -64,6 +65,20 @@ def build_index_html(meta: dict, app_dir: Path) -> str:
     components_css = components_css_path.read_text(encoding="utf-8")
     model_css = model_css_path.read_text(encoding="utf-8")
     model_js = model_js_path.read_text(encoding="utf-8")
+
+    # 离线归档页移除外部依赖（favicon/static、FontAwesome CDN）
+    html = re.sub(
+        r'<link[^>]*rel=["\']icon["\'][^>]*>\s*',
+        "",
+        html,
+        flags=re.I,
+    )
+    html = re.sub(
+        r'<link[^>]*href=["\']https?://[^"\']*font-awesome[^"\']*["\'][^>]*>\s*',
+        "",
+        html,
+        flags=re.I,
+    )
 
     model_css = re.sub(
         r"@import\s+url\(['\"]?/static/css/(?:variables|components)\.css[^)]*\)\s*;?",
@@ -168,6 +183,43 @@ def collect_meta_paths(data_root: Path) -> list[Path]:
     return meta_paths
 
 
+def list_dir_files(dir_path: Path, image_only: bool = False) -> list[str]:
+    if not dir_path.exists():
+        return []
+    files = []
+    for p in dir_path.iterdir():
+        if not p.is_file():
+            continue
+        if p.name.startswith(".") or p.name.startswith("_"):
+            continue
+        if image_only and not re.search(r"\.(jpg|jpeg|png|gif|webp|bmp)$", p.name, re.I):
+            continue
+        files.append(p.name)
+    return sorted(files)
+
+
+def write_local_indexes(model_dir: Path):
+    attach_dir = model_dir / "file"
+    printed_dir = model_dir / "printed"
+    for d, image_only in [(attach_dir, False), (printed_dir, True)]:
+        if not d.exists():
+            continue
+        payload = {
+            "files": list_dir_files(d, image_only=image_only),
+            "updated_at": datetime.now().isoformat(),
+        }
+        (d / "_index.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def inject_offline_files(meta: dict, model_dir: Path) -> dict:
+    out = dict(meta or {})
+    out["offlineFiles"] = {
+        "attachments": list_dir_files(model_dir / "file", image_only=False),
+        "printed": list_dir_files(model_dir / "printed", image_only=True),
+    }
+    return out
+
+
 def looks_like_v2_index(content: str) -> bool:
     if not content:
         return False
@@ -219,6 +271,10 @@ def main() -> int:
         index_path = model_dir / "index.html"
         v1_index_path = model_dir / "index_v1.0.html"
         try:
+            meta_raw = json.loads(meta_path.read_text(encoding="utf-8"))
+            meta = inject_offline_files(meta_raw, model_dir)
+            meta_changed = meta != meta_raw
+
             old_content = ""
             if index_path.exists():
                 old_content = index_path.read_text(encoding="utf-8", errors="ignore")
@@ -229,18 +285,21 @@ def main() -> int:
                 index_path.exists()
                 and index_path.stat().st_mtime >= latest_src_mtime
             )
-            if not args.force and not should_migrate_v1 and is_up_to_date:
+            if not args.force and not should_migrate_v1 and is_up_to_date and not meta_changed:
+                if not args.dry_run:
+                    write_local_indexes(model_dir)
                 print(f"[skip-up-to-date] {index_path}")
                 ok_count += 1
                 continue
 
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
             html = build_index_html(meta, app_dir)
             if args.dry_run:
                 if should_migrate_v1:
                     print(f"[dry-run] move {index_path.name} -> {v1_index_path.name} @ {model_dir}")
                 print(f"[dry-run] write {index_path}")
             else:
+                if meta_changed:
+                    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
                 if should_migrate_v1:
                     index_path.rename(v1_index_path)
                     print(f"[keep-v1] {v1_index_path}")
@@ -249,6 +308,7 @@ def main() -> int:
                     bak = model_dir / "index.html.bak"
                     bak.write_text(index_path.read_text(encoding="utf-8"), encoding="utf-8")
                 index_path.write_text(html, encoding="utf-8")
+                write_local_indexes(model_dir)
                 print(f"[ok] {index_path}")
             ok_count += 1
         except Exception as e:

@@ -105,6 +105,59 @@ def save_upload_file(upload: UploadFile, dest: Path):
     with dest.open("wb") as f:
         shutil.copyfileobj(upload.file, f)
 
+def list_files_in_dir(dir_path: Path, image_only: bool = False) -> List[str]:
+    if not dir_path.exists():
+        return []
+    files = []
+    for p in dir_path.iterdir():
+        if not p.is_file():
+            continue
+        if p.name.startswith(".") or p.name.startswith("_"):
+            continue
+        if image_only and not re.search(r"\.(jpg|jpeg|png|gif|webp|bmp)$", p.name, re.IGNORECASE):
+            continue
+        files.append(p.name)
+    return sorted(files)
+
+
+def write_dir_index(dir_path: Path, files: List[str]):
+    dir_path.mkdir(parents=True, exist_ok=True)
+    payload = {"files": files, "updated_at": datetime.now().isoformat()}
+    (dir_path / "_index.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def read_json_file(path: Path, default):
+    try:
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return default
+
+
+def sync_offline_files_to_meta(model_dir: Path, attachments: Optional[List[str]] = None, printed: Optional[List[str]] = None):
+    meta_path = model_dir / "meta.json"
+    if not meta_path.exists():
+        return
+
+    data = read_json_file(meta_path, {})
+    if not isinstance(data, dict):
+        return
+
+    if attachments is None:
+        attachments = list_files_in_dir(model_dir / "file", image_only=False)
+    if printed is None:
+        printed = list_files_in_dir(model_dir / "printed", image_only=True)
+
+    offline = data.get("offlineFiles")
+    if not isinstance(offline, dict):
+        offline = {}
+    offline["attachments"] = list(dict.fromkeys([str(x) for x in (attachments or [])]))
+    offline["printed"] = list(dict.fromkeys([str(x) for x in (printed or [])]))
+    data["offlineFiles"] = offline
+
+    meta_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
 
 def pick_ext(filename: str, fallback: str) -> str:
     suffix = Path(filename).suffix if filename else ""
@@ -244,6 +297,14 @@ def rebuild_archived_pages(force: bool = False, backup: bool = False, dry_run: b
         processed += 1
 
         try:
+            meta_raw = json.loads(meta_path.read_text(encoding="utf-8"))
+            meta = dict(meta_raw)
+            meta["offlineFiles"] = {
+                "attachments": list_files_in_dir(model_dir / "file", image_only=False),
+                "printed": list_files_in_dir(model_dir / "printed", image_only=True),
+            }
+            meta_changed = meta != meta_raw
+
             old_content = ""
             if index_path.exists():
                 old_content = index_path.read_text(encoding="utf-8", errors="ignore")
@@ -251,12 +312,11 @@ def rebuild_archived_pages(force: bool = False, backup: bool = False, dry_run: b
             latest_src = latest_rebuild_source_mtime(meta_path, assets)
             is_up_to_date = index_path.exists() and index_path.stat().st_mtime >= latest_src
 
-            if not force and not should_migrate_v1 and is_up_to_date:
+            if not force and not should_migrate_v1 and is_up_to_date and not meta_changed:
                 skipped += 1
                 details.append({"dir": model_dir.name, "status": "skipped", "message": "up-to-date"})
                 continue
 
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
             html = build_index_html(meta, {})
 
             if dry_run:
@@ -276,6 +336,7 @@ def rebuild_archived_pages(force: bool = False, backup: bool = False, dry_run: b
                 bak_path = model_dir / "index.html.bak"
                 bak_path.write_text(index_path.read_text(encoding="utf-8"), encoding="utf-8")
 
+            meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
             index_path.write_text(html, encoding="utf-8")
             updated += 1
             details.append({"dir": model_dir.name, "status": "ok", "message": "updated"})
@@ -988,9 +1049,9 @@ async def api_save_gallery_flags(body: dict):
 async def api_list_attachments(model_dir: str):
     target = resolve_model_dir(model_dir)
     attach_dir = target / "file"
-    if not attach_dir.exists():
-        return {"files": []}
-    files = sorted([p.name for p in attach_dir.iterdir() if p.is_file()])
+    files = list_files_in_dir(attach_dir, image_only=False)
+    write_dir_index(attach_dir, files)
+    sync_offline_files_to_meta(target, attachments=files)
     return {"files": files}
 
 
@@ -1021,6 +1082,9 @@ async def api_upload_attachment(model_dir: str, file: UploadFile = File(...)):
     except Exception as e:
         logger.exception("附件保存失败")
         raise HTTPException(500, f"附件保存失败: {e}")
+    files = list_files_in_dir(attach_dir, image_only=False)
+    write_dir_index(attach_dir, files)
+    sync_offline_files_to_meta(target, attachments=files)
     return {"status": "ok", "file": dest.name}
 
 
@@ -1028,9 +1092,9 @@ async def api_upload_attachment(model_dir: str, file: UploadFile = File(...)):
 async def api_list_printed(model_dir: str):
     target = resolve_model_dir(model_dir)
     printed_dir = target / "printed"
-    if not printed_dir.exists():
-        return {"files": []}
-    files = sorted([p.name for p in printed_dir.iterdir() if p.is_file()])
+    files = list_files_in_dir(printed_dir, image_only=True)
+    write_dir_index(printed_dir, files)
+    sync_offline_files_to_meta(target, printed=files)
     return {"files": files}
 
 
@@ -1063,6 +1127,9 @@ async def api_upload_printed(model_dir: str, file: UploadFile = File(...)):
     except Exception as e:
         logger.exception("打印成品保存失败")
         raise HTTPException(500, f"打印成品保存失败: {e}")
+    files = list_files_in_dir(printed_dir, image_only=True)
+    write_dir_index(printed_dir, files)
+    sync_offline_files_to_meta(target, printed=files)
     return {"status": "ok", "file": dest.name}
 
 
@@ -1230,6 +1297,7 @@ async def api_manual_import(
 
     meta_path = model_dir / "meta.json"
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    sync_offline_files_to_meta(model_dir, attachments=[], printed=[])
 
     hero_file = cover_name or (design_names[0] if design_names else (summary_names[0] if summary_names else ""))
     hero_rel = f"./images/{hero_file}" if hero_file else "screenshot.png"
@@ -1285,6 +1353,11 @@ async def api_v2_model_meta(model_dir: str):
         raise HTTPException(404, "meta.json 不存在")
     try:
         data = json.loads(meta_path.read_text(encoding="utf-8"))
+        if not isinstance(data.get("offlineFiles"), dict):
+            data["offlineFiles"] = {
+                "attachments": list_files_in_dir(target / "file", image_only=False),
+                "printed": list_files_in_dir(target / "printed", image_only=True),
+            }
         data["collectDate"] = int(meta_path.stat().st_mtime)
         if not data.get("update_time"):
             data["update_time"] = datetime.fromtimestamp(meta_path.stat().st_mtime).isoformat()
