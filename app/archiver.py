@@ -459,6 +459,21 @@ def parse_summary(design: dict, base_name: str, session: requests.Session, out_d
 
 
 def extract_author(design: dict, html_text: str = None):
+    def _extract_author_handle(href_or_url: str) -> str:
+        if not href_or_url:
+            return ""
+        raw = href_or_url.strip()
+        if raw.startswith("@"):
+            raw = f"/zh/{raw}"
+        parsed = urlparse(raw)
+        path = parsed.path or raw
+        m = re.search(r"(?:^|/)@([A-Za-z0-9_.-]+)(?:[/?#]|$)", path)
+        return m.group(1) if m else ""
+
+    def _build_author_url(handle: str) -> str:
+        handle = (handle or "").lstrip("@").strip()
+        return f"https://makerworld.com.cn/zh/@{handle}" if handle else ""
+
     creator = design.get("designCreator") or {}
     name = creator.get("name") or design.get("creatorName") or ""
     username = creator.get("username") or creator.get("handle") or design.get("creatorUsername") or ""
@@ -475,28 +490,47 @@ def extract_author(design: dict, html_text: str = None):
     # 兜底从 design 层获取用户名
     if not username:
         username = design.get("creatorName") or design.get("creatorUsername") or username
+    if url:
+        handle_from_url = _extract_author_handle(url)
+        if handle_from_url:
+            # 统一收敛到作者主页地址，避免 /upload、/browsing-history 等路径污染
+            url = _build_author_url(handle_from_url)
+            if not username:
+                username = handle_from_url
 
-    # HTML 兜底，从页面 a[href*="/zh/@"] 获取
-    if (not url or not avatar_url or not name) and html_text:
+    # HTML 兜底：优先从作者链接提取 @userid
+    # 若 design 中 url 被污染为 /browsing-history，也强制用 HTML 纠正。
+    suspect_url = "browsing-history" in (url or "")
+    if (not url or not avatar_url or not name or suspect_url) and html_text:
         try:
             soup = BeautifulSoup(html_text, "html.parser")
-            link = soup.find("a", href=re.compile(r"/zh/@"))
-            if link:
+            link_candidates = list(soup.select("a.user_link[href]")) or list(
+                soup.find_all("a", href=re.compile(r"/(?:zh/)?@"))
+            )
+            for link in link_candidates:
                 href = link.get("href") or ""
-                if href and not url:
-                    url = urljoin("https://makerworld.com.cn", href)
+                handle = _extract_author_handle(href)
+                if not handle:
+                    continue
+                # 命中作者 id 后，始终使用标准主页地址
+                if not url or suspect_url:
+                    url = _build_author_url(handle)
+                if not username:
+                    username = handle
                 if not name:
                     name = (link.get_text() or "").strip()
                 if not avatar_url:
                     img = link.find("img")
                     if img and img.get("src"):
                         avatar_url = img.get("src")
+                break
         except Exception as e:
             log("解析作者 DOM 失败:", e)
 
-    # 仍无 url 时，用用户名兜底
-    if not url and username:
-        url = f"https://makerworld.com.cn/zh/@{username}"
+    # 最终统一为 https://makerworld.com.cn/zh/@{userid}
+    final_handle = _extract_author_handle(url) or username
+    if final_handle:
+        url = _build_author_url(final_handle)
     avatar_local = f"author_avatar.{pick_ext_from_url(avatar_url)}" if avatar_url else ""
     return {
         "name": name,

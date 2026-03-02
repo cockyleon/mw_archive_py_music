@@ -3,6 +3,7 @@ import logging
 import re
 import shutil
 import sys
+import uuid
 from html import escape as escape_html
 from datetime import datetime
 from pathlib import Path
@@ -24,11 +25,17 @@ from archiver import (
     parse_cookies,
     sanitize_filename,
 )
+from three_mf_parser import (
+    attach_preview_urls,
+    build_draft_payload,
+    parse_3mf_to_session,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "config.json"
 GALLERY_FLAGS_PATH = BASE_DIR / "gallery_flags.json"
 TMP_DIR = BASE_DIR / "tmp"
+MANUAL_DRAFT_ROOT = TMP_DIR / "manual_drafts"
 DEFAULT_CONFIG = {
     "download_dir": "./data",
     "cookie_file": "./cookie.txt",
@@ -266,6 +273,66 @@ def parse_instance_descs(raw: str) -> List[str]:
     if not isinstance(data, list):
         return []
     return [str(item or "") for item in data]
+
+
+def parse_draft_instance_overrides(raw: str) -> List[dict]:
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return []
+    if not isinstance(data, list):
+        return []
+    out = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        out.append({
+            "enabled": bool(item.get("enabled", True)),
+            "title": str(item.get("title") or "").strip(),
+            "summary": str(item.get("summary") or "").strip(),
+        })
+    return out
+
+
+def load_manual_draft(session_id: str) -> tuple[Path, dict]:
+    sid = (session_id or "").strip()
+    if not sid:
+        raise HTTPException(400, "draft_session_id 不能为空")
+    if not re.fullmatch(r"[a-f0-9]{32}", sid):
+        raise HTTPException(400, "draft_session_id 无效")
+    session_dir = MANUAL_DRAFT_ROOT / sid
+    draft_path = session_dir / "draft.json"
+    if not draft_path.exists():
+        raise HTTPException(404, "3MF 草稿不存在")
+    try:
+        data = json.loads(draft_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(500, f"3MF 草稿读取失败: {e}")
+    if not isinstance(data, dict):
+        raise HTTPException(500, "3MF 草稿格式无效")
+    return session_dir, data
+
+
+def next_instance_id(instances: List[dict]) -> int:
+    max_id = 0
+    for inst in instances or []:
+        try:
+            max_id = max(max_id, int(inst.get("id")))
+        except Exception:
+            continue
+    return max_id + 1
+
+
+def copy_draft_image(session_dir: Path, image_name: str, images_dir: Path) -> str:
+    src = session_dir / "images" / image_name
+    if not src.exists() or not src.is_file():
+        return ""
+    safe = sanitize_filename(src.name) or src.name
+    dest = ensure_unique_path(images_dir / safe)
+    shutil.copy2(src, dest)
+    return dest.name
 
 
 def looks_like_v2_index(content: str) -> bool:
@@ -867,9 +934,12 @@ app.add_middleware(
 
 CFG = load_config()
 
+TMP_DIR.mkdir(parents=True, exist_ok=True)
+MANUAL_DRAFT_ROOT.mkdir(parents=True, exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.mount("/files", StaticFiles(directory=CFG["download_dir"], html=True), name="files")
+app.mount("/tmp", StaticFiles(directory=TMP_DIR), name="tmp")
 
 
 @app.get("/")
@@ -1163,13 +1233,168 @@ async def api_upload_printed(model_dir: str, file: UploadFile = File(...)):
     return {"status": "ok", "file": dest.name}
 
 
+@app.post("/api/manual/3mf/parse")
+async def api_manual_parse_3mf(files: List[UploadFile] = File(...)):
+    file_list = [f for f in (files or []) if f and f.filename]
+    if not file_list:
+        raise HTTPException(400, "请至少上传一个 3MF 文件")
+
+    sid = uuid.uuid4().hex
+    session_dir = MANUAL_DRAFT_ROOT / sid
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    parsed_items = []
+    errors = []
+    for idx, upload in enumerate(file_list, start=1):
+        name = upload.filename or f"instance_{idx}.3mf"
+        if Path(name).suffix.lower() != ".3mf":
+            errors.append({"file": name, "message": "仅支持 .3mf 文件"})
+            continue
+        try:
+            data = await upload.read()
+            if not data:
+                errors.append({"file": name, "message": "文件为空"})
+                continue
+            parsed = parse_3mf_to_session(data, name, session_dir, idx)
+            parsed_items.append(parsed)
+        except Exception as e:
+            errors.append({"file": name, "message": str(e)})
+
+    if not parsed_items:
+        shutil.rmtree(session_dir, ignore_errors=True)
+        raise HTTPException(400, "3MF 解析失败: 未识别到有效内容")
+
+    draft = build_draft_payload(sid, parsed_items)
+    draft["createdAt"] = datetime.now().isoformat()
+    draft["errors"] = errors
+    (session_dir / "draft.json").write_text(json.dumps(draft, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return {
+        "status": "ok",
+        "draft": attach_preview_urls(draft, prefix="manual_drafts"),
+    }
+
+
+@app.post("/api/models/{model_dir}/instances/import-3mf")
+async def api_model_add_instance_from_3mf(
+    model_dir: str,
+    file: UploadFile = File(...),
+    title: str = Form(""),
+    summary: str = Form(""),
+):
+    if file is None or not file.filename:
+        raise HTTPException(400, "3MF 文件不能为空")
+    if Path(file.filename).suffix.lower() != ".3mf":
+        raise HTTPException(400, "仅支持 .3mf 文件")
+
+    target = resolve_model_dir(model_dir)
+    meta_path = target / "meta.json"
+    if not meta_path.exists():
+        raise HTTPException(404, "meta.json 不存在")
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        raise HTTPException(500, f"读取 meta.json 失败: {e}")
+    if not isinstance(meta, dict):
+        raise HTTPException(500, "meta.json 格式无效")
+
+    images_dir = target / "images"
+    instances_dir = target / "instances"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    instances_dir.mkdir(parents=True, exist_ok=True)
+
+    temp_session = TMP_DIR / "instance_imports" / uuid.uuid4().hex
+    temp_session.mkdir(parents=True, exist_ok=True)
+    try:
+        parsed = parse_3mf_to_session(await file.read(), file.filename, temp_session, 1)
+        # 复制 3MF
+        src_3mf = temp_session / "instances" / str(parsed.get("instanceFile") or "")
+        if not src_3mf.exists():
+            raise HTTPException(500, "未解析到有效 3MF 文件")
+        dest_3mf = ensure_unique_path(instances_dir / sanitize_filename(src_3mf.name))
+        shutil.copy2(src_3mf, dest_3mf)
+
+        # 复制实例图片
+        pics = []
+        for pidx, fn in enumerate(parsed.get("designFiles") or [], start=1):
+            copied = copy_draft_image(temp_session, str(fn), images_dir)
+            if not copied:
+                continue
+            pics.append({
+                "index": pidx,
+                "url": "",
+                "relPath": f"images/{copied}",
+                "fileName": copied,
+                "isRealLifePhoto": 0,
+            })
+
+        # 复制盘缩略图
+        plates = []
+        for pidx, plate in enumerate(parsed.get("plates") or [], start=1):
+            src_th = str(plate.get("thumbnailFile") or "")
+            copied_th = copy_draft_image(temp_session, src_th, images_dir)
+            if not copied_th:
+                continue
+            plates.append({
+                "index": int(plate.get("index") or pidx),
+                "prediction": int(plate.get("prediction") or 0),
+                "weight": int(plate.get("weight") or 0),
+                "filaments": plate.get("filaments") if isinstance(plate.get("filaments"), list) else [],
+                "thumbnailUrl": "",
+                "thumbnailRelPath": f"images/{copied_th}",
+                "thumbnailFile": copied_th,
+            })
+
+        instances = meta.get("instances")
+        if not isinstance(instances, list):
+            instances = []
+            meta["instances"] = instances
+        new_id = next_instance_id(instances)
+        inst_title = (title or "").strip() or str(parsed.get("profileTitle") or parsed.get("modelTitle") or dest_3mf.stem)
+        inst_summary = (summary or "").strip() or str(parsed.get("profileSummaryText") or parsed.get("summaryText") or "")
+
+        instances.append({
+            "id": new_id,
+            "title": inst_title,
+            "titleTranslated": "",
+            "publishTime": str(parsed.get("creationDate") or ""),
+            "downloadCount": 0,
+            "printCount": 0,
+            "prediction": 0,
+            "weight": 0,
+            "materialCnt": 0,
+            "materialColorCnt": 0,
+            "needAms": False,
+            "plates": plates,
+            "pictures": pics,
+            "instanceFilaments": [],
+            "summary": inst_summary,
+            "summaryTranslated": "",
+            "name": dest_3mf.name,
+            "downloadUrl": "",
+            "apiUrl": "",
+        })
+
+        meta["update_time"] = datetime.now().isoformat()
+        ensure_collect_date(meta, int(meta_path.stat().st_mtime))
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        sync_offline_files_to_meta(target)
+        (target / "index.html").write_text(build_index_html(meta, {}), encoding="utf-8")
+
+        return {"status": "ok", "message": f"模型已更新成功：已添加打印配置 {inst_title}", "instance_id": new_id}
+    finally:
+        shutil.rmtree(temp_session, ignore_errors=True)
+
+
 @app.post("/api/models/manual")
 async def api_manual_import(
-    title: str = Form(...),
+    title: str = Form(""),
     modelLink: str = Form(""),
     sourceLink: str = Form(""),
     summary: str = Form(""),
     tags: str = Form(""),
+    draft_session_id: str = Form(""),
+    draft_instance_overrides: str = Form(""),
     cover: Optional[UploadFile] = File(None),
     design_images: List[UploadFile] = File([]),
     instance_files: List[UploadFile] = File([]),
@@ -1178,7 +1403,12 @@ async def api_manual_import(
     instance_descs: str = Form(""),
     instance_picture_counts: str = Form(""),
 ):
-    name = (title or "").strip()
+    draft_data = {}
+    draft_session_dir: Optional[Path] = None
+    if (draft_session_id or "").strip():
+        draft_session_dir, draft_data = load_manual_draft(draft_session_id)
+
+    name = (title or "").strip() or str(draft_data.get("title") or "").strip()
     if not name:
         raise HTTPException(400, "模型名称不能为空")
 
@@ -1193,6 +1423,19 @@ async def api_manual_import(
     design_names: List[str] = []
     summary_names: List[str] = []
     cover_name = ""
+    draft_overrides = parse_draft_instance_overrides(draft_instance_overrides)
+
+    if draft_data and draft_session_dir is not None:
+        draft_cover = str(draft_data.get("coverFile") or "").strip()
+        if draft_cover:
+            copied = copy_draft_image(draft_session_dir, draft_cover, images_dir)
+            if copied:
+                cover_name = copied
+
+        for draft_img in draft_data.get("designFiles") or []:
+            copied = copy_draft_image(draft_session_dir, str(draft_img), images_dir)
+            if copied:
+                design_names.append(copied)
 
     if cover and cover.filename:
         ext = pick_ext(cover.filename, ".jpg")
@@ -1203,7 +1446,7 @@ async def api_manual_import(
         if not upload or not upload.filename:
             continue
         ext = pick_ext(upload.filename, ".jpg")
-        fname = f"design_{idx:02d}{ext}"
+        fname = f"design_{len(design_names) + idx:02d}{ext}"
         save_upload_file(upload, images_dir / fname)
         design_names.append(fname)
 
@@ -1228,6 +1471,76 @@ async def api_manual_import(
                 pic_counts.append(0)
     pic_offset = 0
     instances = []
+    curr_inst_id = 1
+
+    if draft_data and draft_session_dir is not None:
+        draft_instances = draft_data.get("instances") or []
+        for i, ditem in enumerate(draft_instances, start=1):
+            ov = draft_overrides[i - 1] if (i - 1) < len(draft_overrides) else {}
+            if ov and not ov.get("enabled", True):
+                continue
+            src_name = str(ditem.get("name") or "").strip()
+            src_3mf = draft_session_dir / "instances" / src_name
+            if not src_name or not src_3mf.exists():
+                continue
+            dest_3mf = ensure_unique_path(instances_dir / sanitize_filename(src_name))
+            shutil.copy2(src_3mf, dest_3mf)
+
+            pics = []
+            for pidx, pic in enumerate(ditem.get("pictures") or [], start=1):
+                src_pic_name = str(pic.get("fileName") or Path(str(pic.get("relPath") or "")).name)
+                copied = copy_draft_image(draft_session_dir, src_pic_name, images_dir)
+                if not copied:
+                    continue
+                pics.append({
+                    "index": pidx,
+                    "url": "",
+                    "relPath": f"images/{copied}",
+                    "fileName": copied,
+                    "isRealLifePhoto": int(pic.get("isRealLifePhoto") or 0),
+                })
+
+            plates = []
+            for pidx, plate in enumerate(ditem.get("plates") or [], start=1):
+                src_th = str(plate.get("thumbnailFile") or Path(str(plate.get("thumbnailRelPath") or "")).name)
+                copied_th = copy_draft_image(draft_session_dir, src_th, images_dir)
+                if not copied_th:
+                    continue
+                plates.append({
+                    "index": int(plate.get("index") or pidx),
+                    "prediction": int(plate.get("prediction") or 0),
+                    "weight": int(plate.get("weight") or 0),
+                    "filaments": plate.get("filaments") if isinstance(plate.get("filaments"), list) else [],
+                    "thumbnailUrl": "",
+                    "thumbnailRelPath": f"images/{copied_th}",
+                    "thumbnailFile": copied_th,
+                })
+
+            inst_title = str((ov.get("title") if isinstance(ov, dict) else "") or ditem.get("title") or dest_3mf.stem)
+            inst_summary = str((ov.get("summary") if isinstance(ov, dict) else "") or ditem.get("summary") or "")
+            instances.append({
+                "id": curr_inst_id,
+                "title": inst_title,
+                "titleTranslated": "",
+                "summary": inst_summary,
+                "summaryTranslated": "",
+                "name": dest_3mf.name,
+                "publishTime": str(ditem.get("publishTime") or ""),
+                "downloadCount": 0,
+                "printCount": 0,
+                "prediction": int(ditem.get("prediction") or 0),
+                "weight": int(ditem.get("weight") or 0),
+                "materialCnt": int(ditem.get("materialCnt") or 0),
+                "materialColorCnt": int(ditem.get("materialColorCnt") or 0),
+                "needAms": bool(ditem.get("needAms") or False),
+                "plates": plates,
+                "pictures": pics,
+                "instanceFilaments": ditem.get("instanceFilaments") if isinstance(ditem.get("instanceFilaments"), list) else [],
+                "downloadUrl": "",
+                "apiUrl": "",
+            })
+            curr_inst_id += 1
+
     for idx, upload in enumerate(instance_files, start=1):
         if not upload or not upload.filename:
             continue
@@ -1260,7 +1573,7 @@ async def api_manual_import(
                 "isRealLifePhoto": 0,
             })
         instances.append({
-            "id": idx,
+            "id": curr_inst_id,
             "title": inst_title,
             "summary": inst_summary,
             "name": dest.name,
@@ -1270,6 +1583,7 @@ async def api_manual_import(
             "pictures": pics,
             "instanceFilaments": [],
         })
+        curr_inst_id += 1
 
     for upload in attachments:
         if not upload or not upload.filename:
@@ -1279,8 +1593,12 @@ async def api_manual_import(
         save_upload_file(upload, dest)
 
     tag_list = [t for t in re.split(r"\s+", (tags or "").strip()) if t]
-    summary_payload = make_summary_payload(summary, summary_names)
+    summary_text = (summary or "").strip() or str(draft_data.get("summary") or "").strip()
+    summary_payload = make_summary_payload(summary_text, summary_names)
     author_url = (sourceLink or modelLink or "").strip()
+    author_name = "手动导入"
+    if draft_data and str(draft_data.get("designer") or "").strip():
+        author_name = str(draft_data.get("designer") or "").strip()
     meta = {
         "baseName": base_name,
         "source": "others",
@@ -1299,7 +1617,7 @@ async def api_manual_import(
             "relPath": f"images/{cover_name}" if cover_name else "",
         },
         "author": {
-            "name": "手动导入",
+            "name": author_name,
             "url": author_url,
             "avatarUrl": "",
             "avatarLocal": "",

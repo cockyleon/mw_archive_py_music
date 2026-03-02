@@ -846,6 +846,74 @@
         });
     }
 
+    // ============ 在线追加打印配置 ============
+
+    function initInstanceImport() {
+        var bar = document.getElementById('instanceAdminBar');
+        var pickBtn = document.getElementById('instance3mfPickBtn');
+        var uploadBtn = document.getElementById('instance3mfUploadBtn');
+        var inputEl = document.getElementById('instance3mfInput');
+        var fileNameEl = document.getElementById('instance3mfFileName');
+        var msgEl = document.getElementById('instance3mfMsg');
+        if (!bar || !pickBtn || !uploadBtn || !inputEl) return;
+
+        function setMsg(text, isError) {
+            if (!msgEl) return;
+            msgEl.textContent = text || '';
+            if (isError) msgEl.classList.add('error');
+            else msgEl.classList.remove('error');
+        }
+
+        if (!canUseBackendApi() || location.protocol === 'file:') {
+            bar.classList.add('hidden');
+            return;
+        }
+        bar.classList.remove('hidden');
+
+        pickBtn.addEventListener('click', function () {
+            inputEl.click();
+        });
+        inputEl.addEventListener('change', function () {
+            var f = inputEl.files && inputEl.files[0];
+            if (fileNameEl) fileNameEl.textContent = f ? f.name : '未选择文件';
+        });
+
+        uploadBtn.addEventListener('click', async function () {
+            var f = inputEl.files && inputEl.files[0];
+            if (!f) {
+                setMsg('请先选择 3MF 文件', true);
+                return;
+            }
+            if (!/\.3mf$/i.test(f.name || '')) {
+                setMsg('仅支持 .3mf 文件', true);
+                return;
+            }
+            var fd = new FormData();
+            fd.append('file', f);
+            uploadBtn.disabled = true;
+            setMsg('正在识别并追加...');
+            try {
+                var res = await fetch(apiUrl('/api/models/' + encodeURIComponent(MODEL_DIR) + '/instances/import-3mf'), {
+                    method: 'POST',
+                    body: fd
+                });
+                if (!res.ok) {
+                    var txt = await res.text();
+                    throw new Error(txt || ('HTTP ' + res.status));
+                }
+                var data = await res.json();
+                setMsg((data && data.message) || '已追加打印配置');
+                inputEl.value = '';
+                if (fileNameEl) fileNameEl.textContent = '未选择文件';
+                setTimeout(function () { location.reload(); }, 500);
+            } catch (e) {
+                setMsg('追加失败：' + (e.message || e), true);
+            } finally {
+                uploadBtn.disabled = false;
+            }
+        });
+    }
+
     // ============ 主入口 ============
 
     async function main() {
@@ -892,6 +960,7 @@
             initLightbox();
             initAttachments();
             initPrinted();
+            initInstanceImport();
 
             // 仅在 file:// 直开且无法调用本地 API 时隐藏上传区块
             if (!canUseBackendApi()) {

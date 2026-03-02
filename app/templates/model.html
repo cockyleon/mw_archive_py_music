@@ -91,6 +91,13 @@
                 <!-- 打印配置 / 实例 (移动端 order 4) -->
                 <div class="instances-section card-block">
                     <div class="section-title"><i class="fas fa-layer-group"></i> 打印配置</div>
+                    <div class="instance-admin hidden" id="instanceAdminBar">
+                        <input type="file" id="instance3mfInput" accept=".3mf" style="display:none">
+                        <button class="inst-admin-btn" type="button" id="instance3mfPickBtn"><i class="fas fa-plus"></i> 添加打印配置</button>
+                        <button class="inst-admin-btn primary" type="button" id="instance3mfUploadBtn"><i class="fas fa-upload"></i> 识别并追加</button>
+                        <span class="inst-admin-file" id="instance3mfFileName">未选择文件</span>
+                        <span class="inst-admin-msg" id="instance3mfMsg"></span>
+                    </div>
                     <div class="instances" id="instanceList"></div>
                 </div>
             </div>

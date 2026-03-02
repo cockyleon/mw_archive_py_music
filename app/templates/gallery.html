@@ -138,6 +138,26 @@
         <button class="manual-modal__close" type="button" data-manual-import-close>×</button>
       </div>
       <form id="manualImportForm" class="manual-form">
+        <input type="hidden" name="draft_session_id" id="manualDraftSessionId">
+        <input type="hidden" name="draft_instance_overrides" id="manualDraftOverrides">
+        <div class="manual-row manual-smart-row">
+          <label>智能识别 3MF (可多选)</label>
+          <div class="manual-inline">
+            <input type="file" id="manual3mfPicker" accept=".3mf" multiple>
+            <button class="manual-btn" type="button" id="manualParse3mf">识别并填充</button>
+            <span class="manual-help">优先读取 Auxiliaries 图片，不存在时自动回退 Metadata</span>
+          </div>
+          <div id="manualParsedPreview" class="manual-draft-preview hidden">
+            <div class="manual-draft-head">
+              <img id="manualDraftCover" class="manual-draft-cover" alt="cover">
+              <div class="manual-draft-meta">
+                <div id="manualDraftTitle" class="manual-draft-title"></div>
+                <div id="manualDraftDesigner" class="manual-draft-designer"></div>
+              </div>
+            </div>
+            <div class="manual-draft-instances" id="parsedInstanceList"></div>
+          </div>
+        </div>
         <div class="manual-grid">
           <div>
             <label>模型名称</label>
@@ -189,8 +209,8 @@
       </form>
     </div>
   </div>
-  <script src="/static/js/gallery.js" defer></script>
-  <script src="/static/js/manual_import.js" defer></script>
+  <script src="/static/js/gallery.js?v=5.1" defer></script>
+  <script src="/static/js/manual_import.js?v=5.1" defer></script>
 </body>
 
 </html>

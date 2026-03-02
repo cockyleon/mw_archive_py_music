@@ -55,6 +55,7 @@ cookie.txt
 *.tmp
 *.bak
 *.cache
+app/tmp/
 
 # OS
 .DS_Store

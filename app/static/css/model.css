@@ -464,6 +464,54 @@ body {
     gap: 12px;
 }
 
+.instance-admin {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 12px;
+    padding: 10px;
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius-md);
+    background: #f8fbfc;
+}
+
+.inst-admin-btn {
+    border: 1px solid var(--border-color);
+    background: #fff;
+    color: var(--text-primary);
+    padding: 6px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.inst-admin-btn.primary {
+    background: var(--color-primary);
+    color: #fff;
+    border-color: var(--color-primary);
+}
+
+.inst-admin-btn:disabled {
+    opacity: .6;
+    cursor: not-allowed;
+}
+
+.inst-admin-file {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.inst-admin-msg {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.inst-admin-msg.error {
+    color: var(--color-error);
+}
+
 .inst-card {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
