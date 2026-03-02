@@ -73,6 +73,7 @@ python server.py
 ## Docker 启动
 先创建目录和txt
 mkdir -p ./app/{data,logs}
+
 touch ./app/cookie.txt
 
 ```bash
