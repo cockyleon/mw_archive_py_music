@@ -45,6 +45,10 @@
 └─ update.sh
 ```
 
+## 页面
+![主页](doc/screenshot/主页.png)
+![模型详情](doc/screenshot/模型详情.png)
+
 ## 运行环境
 - Python `3.10+`（建议 `3.11`）
 - 依赖见 [app/requirements.txt](app/requirements.txt)
