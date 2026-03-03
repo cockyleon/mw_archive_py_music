@@ -47,6 +47,7 @@ app*/logs/
 
 # Data & Config
 data/
+data*/
 *.json
 cookie.txt
 !config.json
