@@ -28,7 +28,8 @@
         if (window.__OFFLINE_META__) {
             return './' + relPath;
         }
-        return '/files/' + encodeURIComponent(modelDir) + '/' + relPath;
+        // 使用 API 路由替代 StaticFiles，避免中文/特殊字符路径编码问题
+        return '/api/models/' + encodeURIComponent(modelDir) + '/file/' + relPath;
     }
 
     /** HTML 转义 */
@@ -150,22 +151,25 @@
     // ============ 实例文件名计算 ============
 
     function pickInstanceFilename(inst, nameHint) {
+        // 优先使用已明确指定的文件名
         var explicit = toName((inst && (inst.fileName || inst.localName)) || '');
         if (explicit) return explicit;
 
-        var hintedName = toName(nameHint || (inst && inst.name) || '');
-        if (hintedName && /\.3mf$/i.test(hintedName)) {
-            return hintedName;
-        }
+        // 与 Python archiver.pick_instance_filename 保持一致：
+        // base = sanitize(title || name || id)
+        var baseName = (inst && (inst.title || inst.name)) || '';
+        if (!baseName && inst) baseName = String(inst.id || 'model');
+        // 简单 sanitize：去除文件系统不允许的字符
+        var base = String(baseName).replace(/[\\/:*?"<>|]/g, '_').replace(/\s+$/, '');
+        if (!base) base = String((inst && inst.id) || 'model');
+        // 如果 base 本身就带 .3mf 后缀，先去掉
+        if (/\.3mf$/i.test(base)) base = base.slice(0, -4);
 
-        var baseName = inst.title || inst.name || inst.id || 'model';
-        var base = String(baseName).replace(/[\\/:*?"<>|]/g, '_');
-        if (!base) {
-            base = String(inst.id || 'model');
-        }
+        // 从 nameHint 推断扩展名
         var ext = '';
-        if (nameHint && nameHint.indexOf('.') > -1) {
-            ext = '.' + nameHint.split('.').pop();
+        var hint = nameHint || (inst && inst.name) || '';
+        if (hint && hint.indexOf('.') > -1) {
+            ext = '.' + hint.split('.').pop();
         }
         if (!ext) {
             ext = '.3mf';
@@ -195,22 +199,22 @@
         try {
             var q = new URLSearchParams(location.search || '');
             fromQuery = normalizeApiBase(q.get('apiBase') || '');
-        } catch (_) {}
+        } catch (_) { }
 
         try {
             var m = window.__OFFLINE_META__ || {};
             fromMeta = normalizeApiBase(m.apiBase || m.api_base || '');
-        } catch (_) {}
+        } catch (_) { }
 
         try {
             fromStorage = normalizeApiBase(localStorage.getItem(OFFLINE_API_BASE_KEY) || '');
-        } catch (_) {}
+        } catch (_) { }
 
         var chosen = fromQuery || fromMeta || fromStorage || DEFAULT_OFFLINE_API_BASE;
         chosen = normalizeApiBase(chosen);
         try {
             if (chosen) localStorage.setItem(OFFLINE_API_BASE_KEY, chosen);
-        } catch (_) {}
+        } catch (_) { }
         return chosen;
     }
 

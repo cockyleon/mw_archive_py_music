@@ -1947,6 +1947,28 @@ async def api_delete_model(model_dir: str):
 
 # ---------- v2: 模板渲染模型详情页（测试） ----------
 
+@app.get("/api/models/{model_dir}/file/{file_path:path}")
+async def api_model_file_download(model_dir: str, file_path: str):
+    """通用文件下载接口 — 解决 v2 页面中文路径编码问题"""
+    import urllib.parse
+    target = resolve_model_dir(model_dir)
+    # 安全：防止路径遍历
+    clean_rel = Path(file_path)
+    if ".." in clean_rel.parts:
+        raise HTTPException(400, "非法路径")
+    full_path = (target / clean_rel).resolve()
+    if not str(full_path).startswith(str(target.resolve())):
+        raise HTTPException(400, "路径越界")
+    if not full_path.is_file():
+        raise HTTPException(404, "文件不存在")
+    # 对于 3mf 等文件，加 Content-Disposition 触发下载
+    headers = {}
+    if full_path.suffix.lower() in {".3mf", ".stl", ".step", ".stp", ".zip", ".rar", ".7z"}:
+        encoded_name = urllib.parse.quote(full_path.name)
+        headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{encoded_name}"
+    return FileResponse(full_path, headers=headers)
+
+
 @app.get("/v2/files/{model_dir}")
 async def v2_model_page(model_dir: str):
     """返回通用模型详情页模板，由前端 JS 动态加载 meta.json 渲染"""
