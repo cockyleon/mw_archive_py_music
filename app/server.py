@@ -421,6 +421,20 @@ def load_manual_draft(session_id: str) -> tuple[Path, dict]:
     return session_dir, data
 
 
+def discard_manual_draft(session_id: str) -> bool:
+    sid = (session_id or "").strip()
+    if not sid or not re.fullmatch(r"[a-f0-9]{32}", sid):
+        return False
+    session_dir = (MANUAL_DRAFT_ROOT / sid).resolve()
+    root = MANUAL_DRAFT_ROOT.resolve()
+    if not str(session_dir).startswith(str(root)):
+        return False
+    if not session_dir.exists() or not session_dir.is_dir():
+        return False
+    shutil.rmtree(session_dir, ignore_errors=True)
+    return True
+
+
 def next_instance_id(instances: List[dict]) -> int:
     max_id = 0
     for inst in instances or []:
@@ -479,6 +493,34 @@ def latest_rebuild_source_mtime(meta_path: Path, assets: List[Path]) -> float:
     return latest
 
 
+def _candidate_instance_names(inst: dict) -> List[str]:
+    if not isinstance(inst, dict):
+        return []
+    out: List[str] = []
+    for key in ("fileName", "name", "sourceFileName", "localName", "title"):
+        raw = str(inst.get(key) or "").strip()
+        if not raw:
+            continue
+        name = Path(raw).name.strip()
+        if not name:
+            continue
+        out.append(name)
+        if Path(name).suffix == "":
+            out.append(f"{name}.3mf")
+    # 去重并保持顺序
+    return list(dict.fromkeys(out))
+
+
+def resolve_instance_filename(inst: dict, instances_dir: Path) -> str:
+    if not instances_dir.exists() or not instances_dir.is_dir():
+        return ""
+    candidates = _candidate_instance_names(inst)
+    for name in candidates:
+        if (instances_dir / name).is_file():
+            return name
+    return ""
+
+
 def rebuild_archived_pages(force: bool = False, backup: bool = False, dry_run: bool = False) -> dict:
     root = Path(CFG["download_dir"]).resolve()
     assets = get_v2_frontend_assets()
@@ -499,6 +541,8 @@ def rebuild_archived_pages(force: bool = False, backup: bool = False, dry_run: b
     kept_v1 = 0
     skipped = 0
     failed = 0
+    fixed_instance_files = 0
+    unresolved_instance_files = 0
     details = []
 
     for meta_path in meta_paths:
@@ -516,6 +560,19 @@ def rebuild_archived_pages(force: bool = False, backup: bool = False, dry_run: b
                 "attachments": list_files_in_dir(model_dir / "file", image_only=False),
                 "printed": list_files_in_dir(model_dir / "printed", image_only=True),
             }
+            instances = meta.get("instances")
+            if isinstance(instances, list):
+                instances_dir = model_dir / "instances"
+                for inst in instances:
+                    if not isinstance(inst, dict):
+                        continue
+                    resolved_name = resolve_instance_filename(inst, instances_dir)
+                    if not resolved_name:
+                        unresolved_instance_files += 1
+                        continue
+                    if str(inst.get("fileName") or "").strip() != resolved_name:
+                        inst["fileName"] = resolved_name
+                        fixed_instance_files += 1
             meta_changed = meta != meta_raw
 
             old_content = ""
@@ -564,6 +621,8 @@ def rebuild_archived_pages(force: bool = False, backup: bool = False, dry_run: b
         "kept_v1": kept_v1,
         "skipped": skipped,
         "failed": failed,
+        "fixed_instance_files": fixed_instance_files,
+        "unresolved_instance_files": unresolved_instance_files,
         "dry_run": dry_run,
         "details": details,
     }
@@ -1445,6 +1504,18 @@ async def api_manual_parse_3mf(files: List[UploadFile] = File(...)):
     }
 
 
+@app.delete("/api/manual/drafts/{session_id}")
+async def api_delete_manual_draft(session_id: str):
+    removed = discard_manual_draft(session_id)
+    return {"status": "ok", "removed": removed}
+
+
+@app.post("/api/manual/drafts/{session_id}/discard")
+async def api_discard_manual_draft(session_id: str):
+    removed = discard_manual_draft(session_id)
+    return {"status": "ok", "removed": removed}
+
+
 @app.post("/api/models/{model_dir}/instances/import-3mf")
 async def api_model_add_instance_from_3mf(
     model_dir: str,
@@ -1925,6 +1996,13 @@ async def api_manual_import(
     index_html = build_index_html(meta, assets)
     (model_dir / "index.html").write_text(index_html, encoding="utf-8")
 
+    # 手动导入成功后，清理对应草稿临时目录，避免 manual_drafts 持续堆积
+    if draft_session_dir is not None and draft_session_dir.exists():
+        try:
+            shutil.rmtree(draft_session_dir, ignore_errors=True)
+        except Exception as e:
+            logger.warning("清理手动导入草稿目录失败: %s (%s)", draft_session_dir, e)
+
     logger.info("手动导入模型完成: %s", model_dir)
     return {"status": "ok", "base_name": base_name, "work_dir": str(model_dir.resolve())}
 
@@ -1946,6 +2024,47 @@ async def api_delete_model(model_dir: str):
 
 
 # ---------- v2: 模板渲染模型详情页（测试） ----------
+
+@app.get("/api/models/{model_dir}/instances/{inst_id}/download")
+async def api_model_instance_download(model_dir: str, inst_id: int):
+    import urllib.parse
+
+    target = resolve_model_dir(model_dir)
+    meta_path = target / "meta.json"
+    instances_dir = target / "instances"
+    if not meta_path.exists():
+        raise HTTPException(404, "meta.json 不存在")
+    if not instances_dir.exists() or not instances_dir.is_dir():
+        raise HTTPException(404, "instances 目录不存在")
+
+    data = read_json_file(meta_path, {})
+    instances = data.get("instances") if isinstance(data, dict) else None
+    if not isinstance(instances, list):
+        raise HTTPException(404, "未找到实例信息")
+
+    target_inst = next((x for x in instances if isinstance(x, dict) and str(x.get("id")) == str(inst_id)), None)
+    if not target_inst:
+        raise HTTPException(404, "未找到对应实例")
+
+    resolved_name = resolve_instance_filename(target_inst, instances_dir)
+    if not resolved_name:
+        raise HTTPException(404, "找不到对应的打印配置或者模型文件")
+
+    full_path = (instances_dir / resolved_name).resolve()
+    if not str(full_path).startswith(str(instances_dir.resolve())) or not full_path.is_file():
+        raise HTTPException(404, "找不到对应的打印配置或者模型文件")
+
+    # 运行时自愈：回填 fileName，后续无需再次猜测
+    if str(target_inst.get("fileName") or "").strip() != resolved_name:
+        target_inst["fileName"] = resolved_name
+        try:
+            meta_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            logger.warning("回填实例 fileName 失败: %s / %s", model_dir, inst_id)
+
+    encoded_filename = urllib.parse.quote(full_path.name)
+    headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
+    return FileResponse(full_path, headers=headers)
 
 @app.get("/api/models/{model_dir}/file/{file_path:path}")
 async def api_model_file_download(model_dir: str, file_path: str):

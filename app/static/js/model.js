@@ -152,12 +152,12 @@
 
     function pickInstanceFilename(inst, nameHint) {
         // 优先使用已明确指定的文件名
-        var explicit = toName((inst && (inst.fileName || inst.localName)) || '');
+        var explicit = toName((inst && (inst.fileName || inst.name || inst.sourceFileName || inst.localName)) || '');
         if (explicit) return explicit;
 
         // 与 Python archiver.pick_instance_filename 保持一致：
-        // base = sanitize(title || name || id)
-        var baseName = (inst && (inst.title || inst.name)) || '';
+        // base = sanitize(name || sourceFileName || title || id)
+        var baseName = (inst && (inst.name || inst.sourceFileName || inst.title)) || '';
         if (!baseName && inst) baseName = String(inst.id || 'model');
         // 简单 sanitize：去除文件系统不允许的字符
         var base = String(baseName).replace(/[\\/:*?"<>|]/g, '_').replace(/\s+$/, '');
@@ -167,7 +167,7 @@
 
         // 从 nameHint 推断扩展名
         var ext = '';
-        var hint = nameHint || (inst && inst.name) || '';
+        var hint = nameHint || (inst && (inst.name || inst.sourceFileName)) || '';
         if (hint && hint.indexOf('.') > -1) {
             ext = '.' + hint.split('.').pop();
         }
@@ -381,7 +381,11 @@
         var filaments = inst.instanceFilaments || [];
 
         var fileName = pickInstanceFilename(inst, inst.name || '');
-        var dlHrefLocal = fileUrl(MODEL_DIR, 'instances/' + fileName);
+        var dlById = '';
+        if (inst && inst.id !== undefined && inst.id !== null && String(inst.id).trim() !== '') {
+            dlById = apiUrl('/api/models/' + encodeURIComponent(MODEL_DIR) + '/instances/' + encodeURIComponent(String(inst.id)) + '/download');
+        }
+        var dlHrefLocal = dlById || fileUrl(MODEL_DIR, 'instances/' + fileName);
 
         function toHex(str) {
             var utf8Str = unescape(encodeURIComponent(str));
@@ -394,7 +398,7 @@
             return hex;
         }
         var rawRelPath = MODEL_DIR + '/instances/' + fileName;
-        var bambuProxyUrl = window.location.origin + '/api/bambu/download/' + toHex(rawRelPath) + '.3mf';
+        var bambuProxyUrl = dlById || (window.location.origin + '/api/bambu/download/' + toHex(rawRelPath) + '.3mf');
 
         // 耗材 chips
         var chipsHtml = '';
@@ -474,7 +478,7 @@
             '</div>' +
             (dlHrefLocal ? '<div class="inst-actions">' +
                 (platesDataHtml ? '<button class="inst-btn inst-details" onclick="openPlatesModal(this)" data-plates="' + platesDataHtml + '"><i class="fas fa-list"></i> 详情</button>' : '') +
-                '<a class="inst-btn inst-bambu" href="bambustudio://open?file=' + bambuProxyUrl + '" title="在 Bambu Studio 中打开"><i class="fas fa-cube"></i> 打印</a>' +
+                '<a class="inst-btn inst-bambu" href="bambustudio://open?file=' + encodeURIComponent(bambuProxyUrl) + '" title="在 Bambu Studio 中打开"><i class="fas fa-cube"></i> 打印</a>' +
                 '<a class="inst-btn inst-local" href="' + dlHrefLocal + '" target="_blank" rel="noreferrer" title="下载资源"><i class="fas fa-download"></i> 下载</a>' +
                 '</div>' : '') +
             '</div>' +
@@ -880,9 +884,26 @@
         if (!bar || !openBtn || !modal || !closeBtn || !cancelBtn || !fileInput || !parseBtn || !saveBtn) return;
 
         var parsedFile = null;
+        var parseDraftSessionId = '';
 
         function normalize3mfName(name) {
             return String(name || '').replace(/^s\d+_/i, '');
+        }
+
+        function normalizeSessionId(value) {
+            var sid = String(value || '').trim();
+            return /^[a-f0-9]{32}$/.test(sid) ? sid : '';
+        }
+
+        async function discardParseDraft(sessionId) {
+            var sid = normalizeSessionId(sessionId);
+            if (!sid) return;
+            try {
+                await fetch(apiUrl('/api/manual/drafts/' + encodeURIComponent(sid)), {
+                    method: 'DELETE'
+                });
+            } catch (_) { }
+            if (parseDraftSessionId === sid) parseDraftSessionId = '';
         }
 
         function stem(name) {
@@ -941,6 +962,7 @@
 
         function resetModal() {
             parsedFile = null;
+            parseDraftSessionId = '';
             fileInput.value = '';
             if (preview) preview.classList.add('hidden');
             if (sourceNameEl) sourceNameEl.textContent = '-';
@@ -960,9 +982,12 @@
         }
 
         function closeModal() {
+            var sid = parseDraftSessionId;
             modal.classList.remove('active');
             modal.setAttribute('aria-hidden', 'true');
             document.body.style.overflow = '';
+            resetModal();
+            discardParseDraft(sid);
         }
 
         if (!canUseBackendApi() || location.protocol === 'file:') {
@@ -991,6 +1016,7 @@
             parseBtn.disabled = true;
             setMsg('正在识别配置信息...');
             try {
+                var prevSid = parseDraftSessionId;
                 var fd = new FormData();
                 fd.append('files', f);
                 var res = await fetch(apiUrl('/api/manual/3mf/parse'), {
@@ -1005,6 +1031,11 @@
                 var draft = data && data.draft ? data.draft : null;
                 var inst = draft && Array.isArray(draft.instances) ? draft.instances[0] : null;
                 if (!inst) throw new Error('未识别到实例配置');
+                var newSid = normalizeSessionId(draft && draft.sessionId ? draft.sessionId : '');
+                parseDraftSessionId = newSid;
+                if (prevSid && prevSid !== newSid) {
+                    discardParseDraft(prevSid);
+                }
                 parsedFile = f;
                 if (preview) preview.classList.remove('hidden');
                 if (sourceNameEl) sourceNameEl.textContent = normalize3mfName(inst.sourceFileName || inst.name || f.name);
@@ -1051,6 +1082,9 @@
                 }
                 var data2 = await res2.json();
                 setMsg((data2 && data2.message) || '已追加打印配置');
+                if (parseDraftSessionId) {
+                    discardParseDraft(parseDraftSessionId);
+                }
                 setTimeout(function () {
                     closeModal();
                     location.reload();

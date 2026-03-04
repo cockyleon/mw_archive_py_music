@@ -24,7 +24,7 @@
       <div>
         <h1>
           <i class="fas fa-archive"></i> MakerWorld 归档控制台
-          <span class="version">v5.1</span>
+          <span class="version">v5.1.1</span>
         </h1>
       </div>
       <div class="config-links">
@@ -49,6 +49,9 @@
         </button>
         <button class="tab" data-tab="missing">
           <i class="fas fa-exclamation-triangle"></i> 缺失记录
+        </button>
+        <button class="tab" data-tab="maintenance">
+          <i class="fas fa-screwdriver-wrench"></i> 其他功能
         </button>
       </div>
 
@@ -114,15 +117,33 @@
               </button>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Tab Content: Maintenance -->
+      <div class="tab-content" id="tab-maintenance">
+        <div class="form-section">
+          <h3>归档更新</h3>
+
+          <div class="info-box">
+            <i class="fas fa-wrench"></i>
+            <div class="info-box-content">
+              <div class="info-box-title">功能说明</div>
+              <div class="info-box-text">
+                历史归档模型生成页面更新到最新版本，同时修复问题（不会删除模型文件）<br>
+                ❗️可能存在风险，建议先备份已归档模型目录后再执行。
+              </div>
+            </div>
+          </div>
 
           <div class="form-group">
-            <label class="form-label">归档页面维护</label>
+            <label class="form-label">历史归档维护</label>
             <div class="archive-input-group">
               <button class="btn btn-secondary" onclick="rebuildArchivedPages()">
-                <i class="fas fa-sync-alt"></i> 更新已归档页面
+                <i class="fas fa-sync-alt"></i> 一键更新历史归档
               </button>
               <div class="text-muted text-small" style="display:flex; align-items:center;">
-                基于现有 meta.json 与最新前端模板重建 index.html（增量更新）
+                扫描并按最新模板重建页面。
               </div>
             </div>
           </div>
@@ -401,8 +422,8 @@
     }
 
     async function rebuildArchivedPages() {
-      if (!confirm('将基于当前模板增量更新已归档页面，是否继续？')) return;
-      appendLog('开始更新已归档页面...');
+      if (!confirm('将修复历史归档页面与下载映射，是否继续？')) return;
+      appendLog('开始执行归档更新...');
       const res = await fetch('/api/archive/rebuild-pages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -410,15 +431,16 @@
       });
       if (res.ok) {
         const data = await res.json();
-        appendLog(`页面更新完成：处理 ${data.processed}，更新 ${data.updated}，跳过 ${data.skipped}，失败 ${data.failed}`);
+        appendLog(`归档更新完成：处理 ${data.processed}，更新 ${data.updated}，跳过 ${data.skipped}，失败 ${data.failed}`);
+        appendLog(`实例映射：修正 ${data.fixed_instance_files || 0}，未定位 ${data.unresolved_instance_files || 0}`);
         if (data.kept_v1) {
           appendLog(`已保留旧版页面：${data.kept_v1} 个目录生成 index_v1.0.html`);
         }
-        alert(`更新完成：处理 ${data.processed}，更新 ${data.updated}，跳过 ${data.skipped}，失败 ${data.failed}`);
+        alert(`修复完成：处理 ${data.processed}，更新 ${data.updated}，跳过 ${data.skipped}，失败 ${data.failed}\n实例映射修正 ${data.fixed_instance_files || 0}，未定位 ${data.unresolved_instance_files || 0}`);
       } else {
         const err = await res.text();
-        appendLog('更新已归档页面失败: ' + err);
-        alert('更新失败: ' + err);
+        appendLog('归档更新失败: ' + err);
+        alert('归档更新失败: ' + err);
       }
     }
 

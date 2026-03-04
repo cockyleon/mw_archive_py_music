@@ -5,9 +5,9 @@
 一个用于归档 MakerWorld 模型到本地的项目，支持模型采集、离线页面生成、模型库浏览、缺失 3MF 重试，以及浏览器插件一键归档。
 
 ## 当前版本
-- `v5.1`（2026-03-03）
-- 更新说明见 [doc/logs/v5.1_update_log.md](doc/logs/v5.1_update_log.md)
-- 本次重点：手动导入识别回显增强、打印配置改为弹窗识别保存、手动导入来源统一为“手动导入（LocalModel）”、导入编号改为 data 目录独立持久化。
+- `v5.1.1`（2026-03-04）
+- 更新说明见 [doc/logs/v5.1.1_update_log.md](doc/logs/v5.1.1_update_log.md)
+- 本次重点：修复历史归档实例下载名兼容问题，新增实例下载兜底接口，控制台新增“归档修复”标签并优化说明文案。
 
 ## 核心能力
 - 归档模型并落盘为独立目录：`MW_<id>_<title>/`
@@ -174,7 +174,7 @@ http://127.0.0.1:8000
 1. 在 `/config` 设置 Cookie（或调用 `POST /api/cookie`）。
 2. 在 `/config` 输入模型链接执行归档（或调用 `POST /api/archive`）。
 3. 若同模型再次归档，系统自动执行更新。
-4. 归档历史样式升级时，点击“更新已归档页面”或调用 `POST /api/archive/rebuild-pages`。
+4. 归档历史样式升级时，点击“归档修复”中的“一键更新历史归档”或调用 `POST /api/archive/rebuild-pages`。
 5. 在 `/` 模型库查看、筛选、标记和打开本地模型页面。
 
 注: 为减少触发验证,目前只能一次归档一个模型.
@@ -201,6 +201,7 @@ http://127.0.0.1:8000
 - `POST /api/models/{model_dir}/attachments`
 - `GET /api/models/{model_dir}/printed`
 - `POST /api/models/{model_dir}/printed`
+- `GET /api/models/{model_dir}/instances/{inst_id}/download`
 - `GET /v2/files/{model_dir}`
 - `GET /api/v2/models/{model_dir}/meta`
 
@@ -222,6 +223,7 @@ Chrome 插件：
 
 ## 文档目录
 - [api.md (API 接口文档)](doc/readme/api.md)
+- [v5.1.1_update_log.md](doc/logs/v5.1.1_update_log.md)
 - [v5.1_update_log.md](doc/logs/v5.1_update_log.md)
 - [v5.0_update_log.md](doc/logs/v5.0_update_log.md)
 - [v4.5_update_log.md](doc/logs/v4.5_update_log.md)
