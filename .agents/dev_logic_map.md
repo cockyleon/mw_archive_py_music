@@ -1,7 +1,7 @@
 # MakerWorld Archive 开发快速定位手册
 
 > 目的：后续修改时先读本文件，快速定位代码入口与逻辑分层，避免反复全量扫描。
-> 适用版本：v5.1.2（当前代码状态）
+> 适用版本：v5.2（当前代码状态）
 
 ## 1. 入口与运行模式
 
@@ -81,6 +81,23 @@
     - `POST /api/manual/drafts/{session_id}/discard`
   - 手动导入成功后会清理对应草稿目录（server 侧兜底）
 
+### 2.7 主题切换（亮色 / 暗黑）
+- 共享脚本：`app/static/js/theme.js`
+- 存储键：`localStorage["mw_theme"]`，取值 `light` / `dark`
+- 页面入口：
+  - `app/templates/gallery.html`
+  - `app/templates/config.html`
+  - `app/templates/model.html`（在线详情页 `/v2/files/{model_dir}`）
+  - 以上页面都在 `<head>` 先写入 `data-theme`，减少首屏闪烁
+  - 两页都使用 `[data-theme-toggle]` 按钮触发切换
+- 样式层：
+  - `app/static/css/variables.css`
+  - 通过 `:root[data-theme="dark"]` 覆盖变量实现暗黑
+  - `@media (prefers-color-scheme: dark)` 仅在未显式设置 `data-theme` 时生效
+- 当前范围：
+  - 适配主页（模型库）、配置页、在线详情页（`/v2/files/...`）
+  - 在线详情页始终跟随主页主题（无单独开关）
+
 ## 3. 高频改动定位（按需求找入口）
 
 ### 3.1 “下载地址错了 / 404 / 文件名不对”
@@ -103,6 +120,13 @@
 - `app/archiver.py -> pick_instance_filename()`
 - `app/server.py -> pick_instance_filename()`（兼容重下载/补下载链路）
 
+### 3.5 “主题按钮/暗黑配色要调整”
+直接改：
+1. `app/static/js/theme.js`（切换行为、文案、图标）
+2. `app/static/css/variables.css`（主题变量）
+3. `app/static/css/gallery.css`、`app/static/css/config.css`、`app/static/css/model.css`（页面级适配）
+4. `app/templates/gallery.html`、`app/templates/config.html`、`app/templates/model.html`（按钮位置与脚本引入）
+
 ## 4. 快速排障流程（建议顺序）
 
 1. 先判断页面模式：
@@ -118,4 +142,3 @@
 
 - 当前项目未启用独立 `app/tg_push.py`（文件不存在）。
 - 若后续恢复 Telegram 推送，请在本文件补充“配置字段 + 触发时机 + 接口入口”。
-

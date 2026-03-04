@@ -5,9 +5,9 @@
 一个用于归档 MakerWorld 模型到本地的项目，支持模型采集、离线页面生成、模型库浏览、缺失 3MF 重试，以及浏览器插件一键归档。
 
 ## 当前版本
-- `v5.1.2`（2026-03-04）
-- 更新说明见 [doc/logs/v5.1.2_update_log.md](doc/logs/v5.1.2_update_log.md)
-- 本次重点：修复实例文件名重复后缀导致的下载异常（如 `.3mf.3mf`），完善历史兼容；并调整为仅在线版本显示“打印”按钮。
+- `v5.2`（2026-03-04）
+- 更新说明见 [doc/logs/v5.2_update_log.md](doc/logs/v5.2_update_log.md)
+- 本次重点：新增亮色/暗黑主题切换，主页与配置页支持一键切换；在线详情页（`/v2/files/...`）自动跟随主页主题。
 
 ## 核心能力
 - 归档模型并落盘为独立目录：`MW_<id>_<title>/`
@@ -226,6 +226,7 @@ Chrome 插件：
 ## 文档目录
 - [api.md (API 接口文档)](doc/readme/api.md)
 - [update.sh 使用说明](doc/readme/update_sh_usage.md)
+- [v5.2_update_log.md](doc/logs/v5.2_update_log.md)
 - [v5.1.1_update_log.md](doc/logs/v5.1.1_update_log.md)
 - [v5.1.2_update_log.md](doc/logs/v5.1.2_update_log.md)
 - [v5.1_update_log.md](doc/logs/v5.1_update_log.md)
