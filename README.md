@@ -5,7 +5,7 @@
 一个用于归档 MakerWorld 模型到本地的项目，支持模型采集、离线页面生成、模型库浏览、缺失 3MF 重试，以及浏览器插件一键归档。
 
 ## 当前版本
-- `v5.2`（2026-03-04）
+- `v5.2.0`（待发布）
 - 更新说明见 [doc/logs/v5.2_update_log.md](doc/logs/v5.2_update_log.md)
 - 本次重点：新增亮色/暗黑主题切换，主页与配置页支持一键切换；在线详情页（`/v2/files/...`）自动跟随主页主题。
 
@@ -220,6 +220,9 @@ Chrome 插件：
 
 ## 脚本说明
 - `update.sh`：更新与部署编排脚本，支持 `git pull` 无更新时确认是否继续重部署。详细用法与“快速本地构建更新”配置见 [doc/readme/update_sh_usage.md](doc/readme/update_sh_usage.md)。
+- `version.yml`：统一版本源（项目、油猴、Chrome 扩展版本）。
+- `scripts/sync_version.py`：将 `version.yml` 的版本同步到项目文件。
+- `scripts/release_tag.ps1`：一键执行“版本同步 -> commit -> 打 tag -> push”；推送 `v*` tag 后会由 GitHub Actions 自动创建 Release。
 - `scripts/rebuild_index_from_meta.py`：根据 `meta.json` 重建归档页面（兼容场景）。
 - `scripts/patch_attachments.py`、`scripts/patch_printed.py`：历史数据补丁脚本。
 
