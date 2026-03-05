@@ -39,6 +39,9 @@ mw_archive/
 - HTML/CSS: class 命名采用 `kebab-case`，组件级前缀（如 `manual-`、`config-`）
 - 所有文件使用 UTF-8 编码
 - 中文注释优先，关键逻辑必须写注释
+- 脚本规范（适用于 `.sh` / `.ps1` / `.py` 等脚本文件）：
+  - 脚本顶部必须包含“脚本说明”（用途、输入参数、执行流程/注意事项）
+  - 脚本内部必须添加详细中文注释，说明关键步骤、分支逻辑和异常处理意图
 
 ## 开发流程规则
 - 修改代码前，必须先阅读 `.agents/dev_logic_map.md` 中的代码逻辑说明，确认改动入口与影响范围
@@ -60,23 +63,47 @@ mw_archive/
 ## 版本管理规则
 
 ### 版本号更新
-- 每次更新必须同步修改 `app/templates/config.html` 中的版本号:
-  ```html
-  <span class="version">vX.X.X</span>
+- 版本号唯一来源为根目录 `version.yml`，禁止手动分散修改各文件版本号
+- 版本字段说明:
+  - `project_version`: 项目主版本（用于 README、配置页展示、发布 tag）
+  - `tampermonkey_version`: 油猴脚本版本（同步到 `@version`）
+  - `chrome_extension_version`: Chrome 扩展版本（同步到 `manifest.json`）
+- 每次版本更新后，必须执行:
+  ```bash
+  python3 scripts/sync_version.py
   ```
+- `scripts/sync_version.py` 负责把 `version.yml` 同步到以下文件:
+  - `README.md`（当前版本）
+  - `app/templates/config.html`（页面版本、静态资源 query 版本）
+  - `plugin/tampermonkey/mw_quick_archive.user.js`（`@version`）
+  - `plugin/chrome_extension/mw_quick_archive_ext/manifest.json`（`version`）
 - 大版本号（如 v5.0 → v6.0）用于重大功能更新或架构变更
 - 小版本号（如 v5.0 → v5.1）用于功能新增或较大的修复
 - 补丁版本号（如 v5.1 → v5.1.1）用于兼容性修复、文案优化、界面微调等不改变整体架构的更新
-- 当前版本规则按 `v5.1.1` 执行，后续版本统一使用三段式版本号（`vX.Y.Z`）
+- 版本统一使用三段式版本号（`vX.Y.Z`）
 
 ### 版本更新日志
 - 每次大的更新在 `doc/logs/` 目录下创建版本更新日志文件
   - 文件命名: `vX.X.X_update_log.md`
   - 内容: 包含详细的技术变更内容、涉及文件、改动细节
 - 同时在根目录 `README.md` 中:
-  - 更新"当前版本"区块的版本号和日期
+  - 更新"当前版本"区块内容（由 `sync_version.py` 同步版本号）
   - 添加对应的更新日志链接
   - 写一段面向用户的简洁更新说明
+- GitHub Release 正文来自 `README.md` 的 `## 当前版本` 区块（由工作流自动提取）
+
+### 发布流程（标准）
+1. 功能开发完成
+2. 人工确认要发布的版本号（修改 `version.yml`）
+3. AI 负责:
+   - 总结本次更新内容
+   - 运行 `scripts/sync_version.py` 同步版本到项目文件
+   - 必要时补充/更新 `doc/logs/vX.X.X_update_log.md` 与 README 当前版本说明
+4. 用户手动执行:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\scripts\release_tag.ps1
+   ```
+5. `release_tag.ps1` 完成 commit/tag/push 后，GitHub Actions 自动创建 Release
 
 ### 更新日志模板
 ```markdown
