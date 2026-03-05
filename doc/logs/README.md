@@ -66,6 +66,13 @@
 
 ### 历史记录
 
+#### 2026-03-05 20:10
+- 版本号：`v5.2.2`
+- 更新说明链接：[`doc/logs/v5.2.2_update_log.md`](./v5.2.2_update_log.md)
+- 本次重点：修复归档同名实例文件覆盖问题；新增实例 `fileName` 记录并统一重下载路径的防覆盖策略。
+- 同步人：AI（Codex）
+- 备注：发布前同步根 `README.md` 当前版本区块。
+
 #### 2026-03-05 19:40
 - 版本号：`v5.2.0`
 - 更新说明链接：[`doc/logs/v5.2_update_log.md`](./v5.2_update_log.md)
@@ -75,6 +82,7 @@
 
 ## 版本日志索引
 
+- [`v5.2.2_update_log.md`](./v5.2.2_update_log.md)
 - [`v5.2_update_log.md`](./v5.2_update_log.md)
 - [`v5.1.2_update_log.md`](./v5.1.2_update_log.md)
 - [`v5.1.1_update_log.md`](./v5.1.1_update_log.md)
