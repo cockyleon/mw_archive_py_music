@@ -227,6 +227,7 @@ Chrome 插件：
 
 ## 文档目录
 - [api.md (API 接口文档)](doc/readme/api.md)
+- [meta.json 字段说明](doc/readme/meta_json_fields.md)
 - [update.sh 使用说明](doc/readme/update_sh_usage.md)
 - [v5.2_update_log.md](doc/logs/v5.2_update_log.md)
 - [v5.1.1_update_log.md](doc/logs/v5.1.1_update_log.md)
