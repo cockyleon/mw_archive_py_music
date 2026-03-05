@@ -5,6 +5,7 @@ import shutil
 import sys
 import threading
 import uuid
+from copy import deepcopy
 from html import escape as escape_html
 from datetime import datetime
 from pathlib import Path
@@ -32,6 +33,7 @@ from three_mf_parser import (
     build_draft_payload,
     parse_3mf_to_session,
 )
+from tg_push import TelegramPushService, extract_makerworld_model_url
 
 BASE_DIR = Path(__file__).resolve().parent
 VERSION_FILE_CANDIDATES = [
@@ -45,9 +47,23 @@ DEFAULT_CONFIG = {
     "download_dir": "./data",
     "cookie_file": "./cookie.txt",
     "logs_dir": "./logs",
+    "notifications": {
+        "telegram": {
+            "enable_push": False,
+            "bot_token": "",
+            "chat_id": "",
+            "web_base_url": "http://127.0.0.1:8000",
+        },
+        # 预留其他通知渠道扩展（例如企业微信）
+        "wecom": {
+            "enable_push": False,
+            "enable_command": False,
+        },
+    },
 }
 MANUAL_COUNTER_LOCK = threading.Lock()
 MANUAL_COUNTER_FILE = "_manual_import_counter.json"
+ARCHIVE_LOCK = threading.Lock()
 
 
 def load_project_version() -> str:
@@ -743,37 +759,68 @@ def build_local_model_dir(title: str) -> tuple[str, Path]:
 
 
 # ---------- 配置与持久化 ----------
-def load_config():
+def _merge_defaults(target: dict, defaults: dict) -> bool:
+    changed = False
+    for k, v in defaults.items():
+        if k not in target:
+            target[k] = deepcopy(v)
+            changed = True
+            continue
+        if isinstance(v, dict):
+            current = target.get(k)
+            if not isinstance(current, dict):
+                target[k] = deepcopy(v)
+                changed = True
+                continue
+            if _merge_defaults(current, v):
+                changed = True
+    return changed
+
+
+def load_raw_config() -> dict:
     changed = False
     if CONFIG_PATH.exists():
-        cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    else:
-        cfg = dict(DEFAULT_CONFIG)
-        changed = True
-    if not isinstance(cfg, dict):
-        cfg = dict(DEFAULT_CONFIG)
-        changed = True
-    for k, v in DEFAULT_CONFIG.items():
-        if k not in cfg:
-            cfg[k] = v
+        try:
+            cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            cfg = deepcopy(DEFAULT_CONFIG)
             changed = True
+    else:
+        cfg = deepcopy(DEFAULT_CONFIG)
+        changed = True
 
-    # 仅移除已废弃字段，不因相对/绝对路径规范化而回写 config.json
+    if not isinstance(cfg, dict):
+        cfg = deepcopy(DEFAULT_CONFIG)
+        changed = True
+
+    if _merge_defaults(cfg, DEFAULT_CONFIG):
+        changed = True
+
     if "manual_local_model_counter" in cfg:
         del cfg["manual_local_model_counter"]
         changed = True
 
-    # 运行时使用绝对路径，配置文件本身保留用户填写的相对路径
-    runtime_cfg = dict(cfg)
-    runtime_cfg["download_dir"] = str((BASE_DIR / cfg.get("download_dir", "data")).resolve())
-    runtime_cfg["cookie_file"] = str((BASE_DIR / cfg.get("cookie_file", "cookie.txt")).resolve())
-    runtime_cfg["logs_dir"] = str((BASE_DIR / cfg.get("logs_dir", "logs")).resolve())
-
-    Path(runtime_cfg["download_dir"]).mkdir(parents=True, exist_ok=True)
-    Path(runtime_cfg["logs_dir"]).mkdir(parents=True, exist_ok=True)
     if changed:
         CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-    return runtime_cfg
+    return cfg
+
+
+def build_runtime_config(raw_cfg: dict) -> dict:
+    cfg = deepcopy(raw_cfg)
+    cfg["download_dir"] = str((BASE_DIR / raw_cfg.get("download_dir", "data")).resolve())
+    cfg["cookie_file"] = str((BASE_DIR / raw_cfg.get("cookie_file", "cookie.txt")).resolve())
+    cfg["logs_dir"] = str((BASE_DIR / raw_cfg.get("logs_dir", "logs")).resolve())
+    Path(cfg["download_dir"]).mkdir(parents=True, exist_ok=True)
+    Path(cfg["logs_dir"]).mkdir(parents=True, exist_ok=True)
+    return cfg
+
+
+def load_config():
+    return build_runtime_config(load_raw_config())
+
+
+def save_raw_config(raw_cfg: dict):
+    CONFIG_PATH.write_text(json.dumps(raw_cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def load_gallery_flags() -> dict:
@@ -812,6 +859,120 @@ def write_cookie(cfg, cookie: str):
     # 额外记录更新时间
     with (Path(cfg["logs_dir"]) / "cookie.log").open("a", encoding="utf-8") as f:
         f.write(f"{datetime.now().isoformat()}\tupdate\n")
+
+
+def get_telegram_runtime_cfg() -> dict:
+    tg = (CFG.get("notifications") or {}).get("telegram") or {}
+    return {
+        "enable_push": bool(tg.get("enable_push", False)),
+        "bot_token": str(tg.get("bot_token") or "").strip(),
+        "chat_id": str(tg.get("chat_id") or "").strip(),
+        "web_base_url": str(tg.get("web_base_url") or "http://127.0.0.1:8000").strip(),
+    }
+
+
+def tg_cookie_status_text() -> str:
+    cookie = read_cookie(CFG)
+    if not cookie:
+        return "🍪 Cookie 状态：未设置\n🕒 更新时间：-"
+    cookie_path = Path(CFG["cookie_file"])
+    updated = (
+        datetime.fromtimestamp(cookie_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        if cookie_path.exists()
+        else "-"
+    )
+    return f"🍪 Cookie 状态：✅ 已设置\n🕒 更新时间：{updated}"
+
+
+def tg_archive_count_text() -> str:
+    root = Path(CFG["download_dir"])
+    if not root.exists():
+        return "当前已归档模型数：0"
+    count = 0
+    for p in root.iterdir():
+        if p.is_dir() and (p / "meta.json").exists():
+            count += 1
+    return f"当前已归档模型数：{count}"
+
+
+def tg_search_models_text(keyword: str) -> str:
+    kw = str(keyword or "").strip().lower()
+    if not kw:
+        return "🔎 请输入关键词。"
+
+    base_url = get_telegram_runtime_cfg().get("web_base_url") or "http://127.0.0.1:8000"
+    base_url = str(base_url).rstrip("/")
+
+    root = Path(CFG["download_dir"])
+    if not root.exists():
+        return "📭 本地模型库为空。"
+
+    matched = []
+    for d in root.iterdir():
+        if not d.is_dir():
+            continue
+        meta_path = d / "meta.json"
+        if not meta_path.exists():
+            continue
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        title = str(meta.get("title") or d.name)
+        if kw in title.lower() or kw in d.name.lower():
+            matched.append(
+                {
+                    "title": title,
+                    "dir": d.name,
+                    "url": f"{base_url}/v2/files/{d.name}",
+                }
+            )
+    if not matched:
+        return f"📭 未找到关键词“{keyword}”相关模型。"
+
+    lines = [f"🔎 关键词“{keyword}”匹配到 {len(matched)} 个模型："]
+    for idx, item in enumerate(matched[:10], start=1):
+        lines.append(f"{idx}. {item['title']}\n   {item['url']}")
+    if len(matched) > 10:
+        lines.append(f"... 其余 {len(matched) - 10} 个结果未展示，请缩小关键词范围。")
+    return "\n".join(lines)
+
+
+def tg_get_base_url_text() -> str:
+    base_url = str(get_telegram_runtime_cfg().get("web_base_url") or "http://127.0.0.1:8000").strip()
+    return base_url.rstrip("/")
+
+
+def tg_set_base_url(raw_url: str) -> str:
+    value = str(raw_url or "").strip()
+    if not re.match(r"^https?://", value, re.IGNORECASE):
+        return "❌ 地址无效，请以 http:// 或 https:// 开头。"
+    value = value.rstrip("/")
+
+    raw_cfg = load_raw_config()
+    notifications = raw_cfg.get("notifications") if isinstance(raw_cfg.get("notifications"), dict) else {}
+    telegram_cfg = notifications.get("telegram") if isinstance(notifications.get("telegram"), dict) else {}
+    telegram_cfg["web_base_url"] = value
+    notifications["telegram"] = telegram_cfg
+    raw_cfg["notifications"] = notifications
+    save_raw_config(raw_cfg)
+    CFG.update(build_runtime_config(raw_cfg))
+    return f"✅ 在线地址前缀已更新为：\n{value}"
+
+
+def classify_archive_exception(err: Exception) -> tuple[str, str]:
+    if isinstance(err, requests.HTTPError):
+        resp = err.response
+        code = resp.status_code if resp is not None else 0
+        if code in (401, 403):
+            return "Cookie 失效告警", "请求被拒绝（401/403），请更新 Cookie 后重试。"
+        if code == 429:
+            return "限流告警", "请求触发限流（429），请稍后重试。"
+        return "归档失败告警", f"HTTP 错误：{code}"
+    text = str(err)
+    if "cf_clearance" in text or "Cloudflare" in text:
+        return "Cookie 失效告警", "检测到 Cloudflare 验证，请更新 Cookie（含 cf_clearance）。"
+    return "归档失败告警", text or "未知错误"
 
 
 def parse_missing(cfg) -> List[dict]:
@@ -1278,6 +1439,93 @@ app.mount("/files", StaticFiles(directory=CFG["download_dir"], html=True), name=
 app.mount("/tmp", StaticFiles(directory=TMP_DIR), name="tmp")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
+# Telegram 服务：根据配置决定是否推送/命令轮询
+TG_SERVICE = TelegramPushService(
+    cfg_getter=get_telegram_runtime_cfg,
+    logger=logger,
+    on_archive_url=lambda url: {},
+    on_cookie_status=tg_cookie_status_text,
+    on_count=tg_archive_count_text,
+    on_search=tg_search_models_text,
+    on_get_base_url=tg_get_base_url_text,
+    on_set_base_url=tg_set_base_url,
+)
+
+
+def build_archive_notify_payload(result: dict, final_dir: Path) -> dict:
+    base_url = str(get_telegram_runtime_cfg().get("web_base_url") or "http://127.0.0.1:8000").rstrip("/")
+    payload = {
+        "action": result.get("action") or "created",
+        "base_name": result.get("base_name") or final_dir.name,
+        "title": "",
+        "url": "",
+        "cover_url": "",
+        "online_url": f"{base_url}/v2/files/{final_dir.name}",
+        "missing_count": len(result.get("missing_3mf") or []),
+    }
+    meta_path = final_dir / "meta.json"
+    if not meta_path.exists():
+        return payload
+    try:
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+        payload["title"] = str(data.get("title") or "")
+        payload["url"] = str(data.get("url") or "")
+        cover = data.get("cover") if isinstance(data.get("cover"), dict) else {}
+        payload["cover_url"] = str(cover.get("url") or data.get("coverUrl") or "")
+    except Exception:
+        return payload
+    return payload
+
+
+def archive_model_with_lock(url: str) -> dict:
+    model_url = extract_makerworld_model_url(url)
+    if not model_url:
+        raise ValueError("链接格式无效，仅支持 makerworld 模型链接")
+    cookie = read_cookie(CFG)
+    if not cookie:
+        raise ValueError("请先设置 cookie")
+
+    with ARCHIVE_LOCK:
+        reset_tmp_dir(TMP_DIR)
+        logger.info("使用 Cookie 片段: %s", cookie[:200])
+        result = archive_model(
+            model_url,
+            cookie,
+            TMP_DIR,
+            Path(CFG["logs_dir"]),
+            logger,
+            existing_root=Path(CFG["download_dir"]),
+        )
+        tmp_work_dir = Path(result.get("work_dir") or "")
+        final_dir = finalize_tmp_archive(tmp_work_dir, Path(CFG["download_dir"]), logger)
+        result["work_dir"] = str(final_dir.resolve())
+        action = result.get("action") or "created"
+        result["message"] = "模型已更新成功" if action == "updated" else "模型归档成功"
+        result["notify_payload"] = build_archive_notify_payload(result, final_dir)
+        return result
+
+
+def _tg_archive_callback(url: str) -> dict:
+    try:
+        return archive_model_with_lock(url)
+    except Exception as e:
+        title, detail = classify_archive_exception(e)
+        TG_SERVICE.notify_alert(title, detail)
+        raise
+
+
+TG_SERVICE.set_archive_handler(_tg_archive_callback)
+
+
+@app.on_event("startup")
+async def startup_events():
+    TG_SERVICE.start()
+
+
+@app.on_event("shutdown")
+async def shutdown_events():
+    TG_SERVICE.stop()
+
 
 @app.get("/")
 async def gallery_page():
@@ -1302,13 +1550,57 @@ async def api_config():
     cfg = load_config()
     cookie_path = Path(cfg["cookie_file"])
     cookie_time = cookie_path.stat().st_mtime if cookie_path.exists() else None
+    tg = get_telegram_runtime_cfg()
     return {
         "download_dir": cfg["download_dir"],
         "logs_dir": cfg["logs_dir"],
         "cookie_file": cfg["cookie_file"],
         "manual_local_model_counter": read_manual_counter(cfg),
         "cookie_updated_at": datetime.fromtimestamp(cookie_time).isoformat() if cookie_time else None,
+        "notify": {
+            "telegram": {
+                "enable_push": tg["enable_push"],
+            }
+        },
     }
+
+
+@app.get("/api/notify-config")
+async def api_get_notify_config():
+    return {"telegram": get_telegram_runtime_cfg()}
+
+
+@app.post("/api/notify-config")
+async def api_save_notify_config(body: dict):
+    payload = body or {}
+    tg_payload = payload.get("telegram") if isinstance(payload.get("telegram"), dict) else {}
+
+    raw_cfg = load_raw_config()
+    notifications = raw_cfg.get("notifications") if isinstance(raw_cfg.get("notifications"), dict) else {}
+    telegram_cfg = notifications.get("telegram") if isinstance(notifications.get("telegram"), dict) else {}
+
+    telegram_cfg["enable_push"] = bool(tg_payload.get("enable_push", telegram_cfg.get("enable_push", False)))
+    telegram_cfg["bot_token"] = str(tg_payload.get("bot_token", telegram_cfg.get("bot_token", ""))).strip()
+    telegram_cfg["chat_id"] = str(tg_payload.get("chat_id", telegram_cfg.get("chat_id", ""))).strip()
+    telegram_cfg["web_base_url"] = str(
+        tg_payload.get("web_base_url", telegram_cfg.get("web_base_url", "http://127.0.0.1:8000"))
+    ).strip()
+
+    notifications["telegram"] = telegram_cfg
+    raw_cfg["notifications"] = notifications
+    save_raw_config(raw_cfg)
+
+    # 持久化后刷新运行时配置
+    CFG.update(build_runtime_config(raw_cfg))
+    return {"status": "ok", "telegram": get_telegram_runtime_cfg()}
+
+
+@app.post("/api/notify-test")
+async def api_notify_test():
+    result = TG_SERVICE.send_test_connection()
+    if result.get("status") != "ok":
+        raise HTTPException(400, result.get("message") or "测试连接失败")
+    return result
 
 
 @app.post("/api/cookie")
@@ -1325,28 +1617,22 @@ async def api_archive(body: dict):
     url = (body or {}).get("url", "").strip()
     if not url:
         raise HTTPException(400, "url 不能为空")
-    cookie = read_cookie(CFG)
-    if not cookie:
-        raise HTTPException(400, "请先设置 cookie")
     try:
-        reset_tmp_dir(TMP_DIR)
-        logger.info("使用 Cookie 片段: %s", cookie[:200])
-        result = archive_model(
-            url,
-            cookie,
-            TMP_DIR,
-            Path(CFG["logs_dir"]),
-            logger,
-            existing_root=Path(CFG["download_dir"]),
-        )
-        tmp_work_dir = Path(result.get("work_dir") or "")
-        final_dir = finalize_tmp_archive(tmp_work_dir, Path(CFG["download_dir"]), logger)
-        result["work_dir"] = str(final_dir.resolve())
-        action = result.get("action") or "created"
-        result["message"] = "模型已更新成功" if action == "updated" else "模型归档成功"
+        result = archive_model_with_lock(url)
+        TG_SERVICE.notify_success(result.get("notify_payload") or {})
+        if len(result.get("missing_3mf") or []) > 0:
+            TG_SERVICE.notify_alert(
+                "下载失败告警",
+                "检测到部分 3MF 下载失败，可能触发了验证机制。请先手动下载任意模型完成验证，再执行缺失重试。",
+            )
         return {"status": "ok", **result}
+    except ValueError as e:
+        err_text = str(e)
+        if "链接格式无效" not in err_text:
+            title, detail = classify_archive_exception(e)
+            TG_SERVICE.notify_alert(title, detail)
+        raise HTTPException(400, str(e))
     except requests.HTTPError as e:
-        # 输出更多上下文（状态码与前 300 字符）
         resp = e.response
         snippet = ""
         if resp is not None:
@@ -1354,9 +1640,13 @@ async def api_archive(body: dict):
             logger.error("归档失败 HTTP %s: %s", resp.status_code, snippet)
         else:
             logger.error("归档失败 HTTP: %s", e)
+        title, detail = classify_archive_exception(e)
+        TG_SERVICE.notify_alert(title, detail)
         raise HTTPException(500, f"归档失败: {e} 片段: {snippet}")
     except Exception as e:
         logger.exception("归档失败")
+        title, detail = classify_archive_exception(e)
+        TG_SERVICE.notify_alert(title, detail)
         raise HTTPException(500, f"归档失败: {e}")
     finally:
         try:

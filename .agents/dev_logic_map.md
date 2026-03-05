@@ -146,5 +146,10 @@
 
 ## 5. 当前状态备注
 
-- 当前项目未启用独立 `app/tg_push.py`（文件不存在）。
-- 若后续恢复 Telegram 推送，请在本文件补充“配置字段 + 触发时机 + 接口入口”。
+- Telegram 推送与命令交互已接入：
+  - 模块：`app/tg_push.py`
+  - 配置来源：`app/config.json -> notifications.telegram`
+  - 配置接口：`GET/POST /api/notify-config`
+  - 触发点：`POST /api/archive` 成功推送、失败/限流/Cookie 异常告警
+  - 命令支持：`/help`、`/cookies`、`/count`、`/search 关键词`、发送模型链接触发归档
+  - 成功消息地址：使用 `notifications.telegram.web_base_url + /v2/files/{model_dir}`

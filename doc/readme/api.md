@@ -8,6 +8,7 @@
 1. [核心流程 API](#1-核心流程-api)
    - 1.1 [提交模型归档任务](#11-提交模型归档任务)
    - 1.2 [同步浏览器 Cookie](#12-同步浏览器-cookie)
+   - 1.3 [通知配置（Telegram）](#13-通知配置telegram)
 2. [画廊及展示层 API](#2-画廊及展示层-api)
    - 2.1 [获取已归档模型列表](#21-获取已归档模型列表)
    - 2.2 [获取画廊标记状态](#22-获取画廊标记状态)
@@ -85,6 +86,35 @@
   "message": "Cookie 同步成功"
 }
 ```
+
+### 1.3 通知配置（Telegram）
+用于读取和保存 Telegram 推送配置。
+
+- **读取 URL:** `/api/notify-config` (Method: `GET`)
+- **保存 URL:** `/api/notify-config` (Method: `POST`)
+- **Content-Type:** `application/json`
+
+**POST 请求参数 (Body):**
+| 字段名称 | 类型 | 必填 | 说明 |
+|----------|------|------|------|
+| telegram.enable_push | bool | 否 | 是否启用归档结果/告警推送 |
+| telegram.bot_token | string | 否 | Telegram Bot Token |
+| telegram.chat_id | string | 否 | 默认推送目标 chat id，支持多个（逗号/空格分隔） |
+| telegram.web_base_url | string | 否 | 生成“项目在线地址”使用的访问前缀（如 `http://127.0.0.1:8000`） |
+
+Telegram 命令说明：
+- `/help`：查看命令列表
+- `/cookies`：查看 Cookie 状态
+- `/count`：查看已归档模型数
+- `/search 关键词`：搜索本地模型并返回在线地址
+- `/url`：查看当前在线地址前缀
+- `/seturl 地址`：设置在线地址前缀
+- 直接发送 MakerWorld 模型链接：触发归档
+
+测试连接接口：
+- **URL:** `/api/notify-test`
+- **Method:** `POST`
+- **说明:** 按当前配置向 `chat_id` 发送测试消息，返回成功/失败数量。
 
 ---
 

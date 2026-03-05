@@ -63,6 +63,9 @@
         <button class="tab" data-tab="missing">
           <i class="fas fa-exclamation-triangle"></i> 缺失记录
         </button>
+        <button class="tab" data-tab="notify">
+          <i class="fas fa-bell"></i> 通知
+        </button>
         <button class="tab" data-tab="maintenance">
           <i class="fas fa-screwdriver-wrench"></i> 其他功能
         </button>
@@ -187,6 +190,44 @@
           </div>
 
           <div id="missingBox"></div>
+        </div>
+      </div>
+
+      <!-- Tab Content: Notify -->
+      <div class="tab-content" id="tab-notify">
+        <div class="form-section">
+          <h3>通知配置（Telegram）</h3>
+          <div class="tg-toggle-row">
+            <span class="tg-toggle-title">推送开关</span>
+            <label class="tg-switch" for="tgEnablePush">
+              <input type="checkbox" id="tgEnablePush">
+              <span class="tg-slider"></span>
+            </label>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Bot Token</label>
+            <input type="text" id="tgBotToken" class="form-input" placeholder="123456:ABC-DEF...">
+          </div>
+          <div class="form-group">
+            <label class="form-label">默认 Chat ID（推送目标，可多个）</label>
+            <input type="text" id="tgChatId" class="form-input" placeholder="-1001234567890, 496548857">
+            <div class="text-muted text-small mt-sm">多个 Chat ID 用英文逗号分隔。</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">项目在线地址前缀</label>
+            <input type="text" id="tgWebBaseUrl" class="form-input" placeholder="http://127.0.0.1:8000">
+            <div class="text-muted text-small mt-sm">用于 Telegram 成功消息中生成本地在线访问地址（/v2/files/...）</div>
+          </div>
+
+          <div class="table-actions">
+            <button class="btn btn-primary" type="button" onclick="saveNotifyConfig()">
+              <i class="fas fa-save"></i> 保存通知配置
+            </button>
+            <button class="btn btn-secondary" type="button" onclick="testNotifyConnection()">
+              <i class="fas fa-satellite-dish"></i> 测试连接
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -372,6 +413,58 @@
       document.getElementById('downloadDir').value = data.download_dir;
       document.getElementById('logsDir').value = data.logs_dir;
       document.getElementById('cookieTime').textContent = 'Cookie 更新时间: ' + (data.cookie_updated_at || '-');
+      await loadNotifyConfig();
+    }
+
+    async function loadNotifyConfig() {
+      const res = await fetch('/api/notify-config');
+      if (!res.ok) return;
+      const data = await res.json();
+      const tg = (data && data.telegram) || {};
+      document.getElementById('tgEnablePush').checked = !!tg.enable_push;
+      document.getElementById('tgBotToken').value = tg.bot_token || '';
+      document.getElementById('tgChatId').value = tg.chat_id || '';
+      document.getElementById('tgWebBaseUrl').value = tg.web_base_url || 'http://127.0.0.1:8000';
+    }
+
+    async function saveNotifyConfig() {
+      const payload = {
+        telegram: {
+          enable_push: !!document.getElementById('tgEnablePush').checked,
+          bot_token: (document.getElementById('tgBotToken').value || '').trim(),
+          chat_id: (document.getElementById('tgChatId').value || '').trim(),
+          web_base_url: (document.getElementById('tgWebBaseUrl').value || '').trim(),
+        }
+      };
+      appendLog('保存通知配置...');
+      const res = await fetch('/api/notify-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        appendLog('通知配置已保存');
+        alert('通知配置已保存');
+      } else {
+        const err = await res.text();
+        appendLog('通知配置保存失败: ' + err);
+        alert('通知配置保存失败');
+      }
+    }
+
+    async function testNotifyConnection() {
+      appendLog('测试 Telegram 连接...');
+      const res = await fetch('/api/notify-test', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        const msg = `测试消息已发送：成功 ${data.success_count}/${data.total_chat_ids}`;
+        appendLog(msg);
+        alert(msg);
+      } else {
+        const err = await res.text();
+        appendLog('测试连接失败: ' + err);
+        alert('测试连接失败: ' + err);
+      }
     }
 
     async function saveCookie() {

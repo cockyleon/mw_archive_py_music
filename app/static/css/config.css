@@ -118,6 +118,67 @@
     margin-bottom: var(--spacing-lg);
 }
 
+/* Telegram Notify */
+.tg-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--spacing-lg);
+    padding: var(--spacing-md) var(--spacing-lg);
+    background: var(--bg-hover);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+}
+
+.tg-toggle-title {
+    font-size: var(--font-size-lg);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-primary);
+}
+
+.tg-switch {
+    position: relative;
+    display: inline-block;
+    width: 60px;
+    height: 32px;
+}
+
+.tg-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.tg-slider {
+    position: absolute;
+    inset: 0;
+    background-color: #c8d1dc;
+    border-radius: 100px;
+    transition: all var(--transition-fast);
+    cursor: pointer;
+}
+
+.tg-slider::before {
+    content: "";
+    position: absolute;
+    width: 24px;
+    height: 24px;
+    left: 4px;
+    top: 4px;
+    background: #fff;
+    border-radius: 50%;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+    transition: all var(--transition-fast);
+}
+
+.tg-switch input:checked + .tg-slider {
+    background-color: var(--color-primary);
+}
+
+.tg-switch input:checked + .tg-slider::before {
+    transform: translateX(28px);
+}
+
 /* Form Grid */
 .form-grid {
     display: grid;
@@ -425,4 +486,8 @@
 :root[data-theme="dark"] .status-badge.warning {
     background: rgba(255, 152, 0, 0.18);
     color: #ffc266;
+}
+
+:root[data-theme="dark"] .tg-slider {
+    background-color: #506172;
 }
