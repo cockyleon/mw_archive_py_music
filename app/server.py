@@ -36,16 +36,21 @@ from three_mf_parser import (
 from tg_push import TelegramPushService, extract_makerworld_model_url
 
 BASE_DIR = Path(__file__).resolve().parent
+CONFIG_DIR = BASE_DIR / "config"
 VERSION_FILE_CANDIDATES = [
     BASE_DIR / "version.yml",
 ]
-CONFIG_PATH = BASE_DIR / "config.json"
-GALLERY_FLAGS_PATH = BASE_DIR / "gallery_flags.json"
+CONFIG_PATH = CONFIG_DIR / "config.json"
+GALLERY_FLAGS_PATH = CONFIG_DIR / "gallery_flags.json"
+COOKIE_STORE_PATH = CONFIG_DIR / "cookie.json"
+LEGACY_CONFIG_PATH = BASE_DIR / "config.json"
+LEGACY_GALLERY_FLAGS_PATH = BASE_DIR / "gallery_flags.json"
+LEGACY_COOKIE_PATH = BASE_DIR / "cookie.txt"
 TMP_DIR = BASE_DIR / "tmp"
 MANUAL_DRAFT_ROOT = TMP_DIR / "manual_drafts"
 DEFAULT_CONFIG = {
     "download_dir": "./data",
-    "cookie_file": "./cookie.txt",
+    "cookie_file": "./config/cookie.json",
     "logs_dir": "./logs",
     "notifications": {
         "telegram": {
@@ -64,6 +69,14 @@ DEFAULT_CONFIG = {
 MANUAL_COUNTER_LOCK = threading.Lock()
 MANUAL_COUNTER_FILE = "_manual_import_counter.json"
 ARCHIVE_LOCK = threading.Lock()
+DEFAULT_GALLERY_FLAGS = {
+    "favorites": [],
+    "printed": [],
+}
+DEFAULT_COOKIE_STORE = {
+    "cn": [],
+    "global": [],
+}
 
 
 def load_project_version() -> str:
@@ -98,14 +111,16 @@ LOGS_DIR.mkdir(parents=True, exist_ok=True)
 logger = logging.getLogger("app")
 logger.setLevel(logging.INFO)
 fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-# 文件
-fh = logging.FileHandler(LOGS_DIR / "app.log", encoding="utf-8")
-fh.setFormatter(fmt)
-logger.addHandler(fh)
-# 控制台
-sh = logging.StreamHandler(sys.stdout)
-sh.setFormatter(fmt)
-logger.addHandler(sh)
+logger.propagate = False
+if not logger.handlers:
+    # 文件
+    fh = logging.FileHandler(LOGS_DIR / "app.log", encoding="utf-8")
+    fh.setFormatter(fmt)
+    logger.addHandler(fh)
+    # 控制台
+    sh = logging.StreamHandler(sys.stdout)
+    sh.setFormatter(fmt)
+    logger.addHandler(sh)
 
 _TAG_RE = re.compile(r"<[^>]+>")
 
@@ -854,7 +869,96 @@ def _merge_defaults(target: dict, defaults: dict) -> bool:
     return changed
 
 
+def ensure_config_dir():
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _normalize_cookie_store(data) -> tuple[dict, bool]:
+    changed = False
+    if not isinstance(data, dict):
+        data = deepcopy(DEFAULT_COOKIE_STORE)
+        changed = True
+
+    out = {}
+    for key in ("cn", "global"):
+        raw = data.get(key)
+        if isinstance(raw, list):
+            values = [str(x or "").strip() for x in raw if str(x or "").strip()]
+        elif isinstance(raw, str):
+            values = [raw.strip()] if raw.strip() else []
+            changed = True
+        else:
+            values = []
+            if key not in data:
+                changed = True
+        out[key] = values
+
+    if set(data.keys()) != {"cn", "global"}:
+        changed = True
+    return out, changed
+
+
+def load_cookie_store(cfg: Optional[dict] = None) -> dict:
+    ensure_config_dir()
+    cfg_now = cfg if isinstance(cfg, dict) else CFG
+    cookie_path = Path((cfg_now or {}).get("cookie_file") or COOKIE_STORE_PATH)
+    changed = False
+    data = None
+
+    if cookie_path.exists():
+        try:
+            raw_text = cookie_path.read_text(encoding="utf-8").strip()
+        except Exception:
+            raw_text = ""
+        if raw_text:
+            try:
+                data = json.loads(raw_text)
+            except Exception:
+                data = {"cn": [raw_text], "global": []}
+                changed = True
+        else:
+            data = deepcopy(DEFAULT_COOKIE_STORE)
+            changed = True
+    elif LEGACY_COOKIE_PATH.exists():
+        try:
+            legacy_cookie = LEGACY_COOKIE_PATH.read_text(encoding="utf-8").strip()
+        except Exception:
+            legacy_cookie = ""
+        data = {
+            "cn": [legacy_cookie] if legacy_cookie else [],
+            "global": [],
+        }
+        changed = True
+    else:
+        data = deepcopy(DEFAULT_COOKIE_STORE)
+        changed = True
+
+    data, normalized = _normalize_cookie_store(data)
+    changed = changed or normalized
+    if changed:
+        cookie_path.parent.mkdir(parents=True, exist_ok=True)
+        cookie_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return data
+
+
+def save_cookie_store(cfg: Optional[dict], store: dict):
+    ensure_config_dir()
+    cfg_now = cfg if isinstance(cfg, dict) else CFG
+    cookie_path = Path((cfg_now or {}).get("cookie_file") or COOKIE_STORE_PATH)
+    normalized, _changed = _normalize_cookie_store(store)
+    cookie_path.parent.mkdir(parents=True, exist_ok=True)
+    cookie_path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def ensure_runtime_support_files(cfg: Optional[dict] = None):
+    ensure_config_dir()
+    cfg_now = cfg if isinstance(cfg, dict) else CFG
+    load_cookie_store(cfg_now)
+    load_gallery_flags()
+
+
 def load_raw_config() -> dict:
+    ensure_config_dir()
     changed = False
     if CONFIG_PATH.exists():
         try:
@@ -862,6 +966,12 @@ def load_raw_config() -> dict:
         except Exception:
             cfg = deepcopy(DEFAULT_CONFIG)
             changed = True
+    elif LEGACY_CONFIG_PATH.exists():
+        try:
+            cfg = json.loads(LEGACY_CONFIG_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            cfg = deepcopy(DEFAULT_CONFIG)
+        changed = True
     else:
         cfg = deepcopy(DEFAULT_CONFIG)
         changed = True
@@ -877,18 +987,26 @@ def load_raw_config() -> dict:
         del cfg["manual_local_model_counter"]
         changed = True
 
+    cookie_file = str(cfg.get("cookie_file") or "").strip()
+    legacy_cookie_aliases = {"cookie.txt", "./cookie.txt", ".\\cookie.txt"}
+    if not cookie_file or cookie_file in legacy_cookie_aliases:
+        cfg["cookie_file"] = DEFAULT_CONFIG["cookie_file"]
+        changed = True
+
     if changed:
         CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     return cfg
 
 
 def build_runtime_config(raw_cfg: dict) -> dict:
+    ensure_config_dir()
     cfg = deepcopy(raw_cfg)
     cfg["download_dir"] = str((BASE_DIR / raw_cfg.get("download_dir", "data")).resolve())
-    cfg["cookie_file"] = str((BASE_DIR / raw_cfg.get("cookie_file", "cookie.txt")).resolve())
+    cfg["cookie_file"] = str((BASE_DIR / raw_cfg.get("cookie_file", "./config/cookie.json")).resolve())
     cfg["logs_dir"] = str((BASE_DIR / raw_cfg.get("logs_dir", "logs")).resolve())
     Path(cfg["download_dir"]).mkdir(parents=True, exist_ok=True)
     Path(cfg["logs_dir"]).mkdir(parents=True, exist_ok=True)
+    Path(cfg["cookie_file"]).parent.mkdir(parents=True, exist_ok=True)
     return cfg
 
 
@@ -897,23 +1015,38 @@ def load_config():
 
 
 def save_raw_config(raw_cfg: dict):
+    ensure_config_dir()
     CONFIG_PATH.write_text(json.dumps(raw_cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def load_gallery_flags() -> dict:
+    ensure_config_dir()
+    changed = False
     if GALLERY_FLAGS_PATH.exists():
         try:
             data = json.loads(GALLERY_FLAGS_PATH.read_text(encoding="utf-8"))
         except Exception:
-            data = {}
+            data = deepcopy(DEFAULT_GALLERY_FLAGS)
+            changed = True
+    elif LEGACY_GALLERY_FLAGS_PATH.exists():
+        try:
+            data = json.loads(LEGACY_GALLERY_FLAGS_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            data = deepcopy(DEFAULT_GALLERY_FLAGS)
+        changed = True
     else:
-        data = {}
+        data = deepcopy(DEFAULT_GALLERY_FLAGS)
+        changed = True
     favorites = data.get("favorites") if isinstance(data.get("favorites"), list) else []
     printed = data.get("printed") if isinstance(data.get("printed"), list) else []
-    return {"favorites": favorites, "printed": printed}
+    normalized = {"favorites": favorites, "printed": printed}
+    if changed or normalized != data:
+        GALLERY_FLAGS_PATH.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+    return normalized
 
 
 def save_gallery_flags(flags: dict):
+    ensure_config_dir()
     data = {
         "favorites": list(dict.fromkeys(flags.get("favorites") or [])),
         "printed": list(dict.fromkeys(flags.get("printed") or [])),
@@ -921,21 +1054,33 @@ def save_gallery_flags(flags: dict):
     GALLERY_FLAGS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def read_cookie(cfg) -> str:
-    cookie_path = Path(cfg["cookie_file"])
-    if cookie_path.exists():
-        return cookie_path.read_text(encoding="utf-8").strip()
+def read_cookie(cfg, platform: str = "cn") -> str:
+    store = load_cookie_store(cfg)
+    values = store.get(platform) if isinstance(store.get(platform), list) else []
+    if values:
+        return str(values[0] or "").strip()
     return ""
 
 
-def write_cookie(cfg, cookie: str):
-    cookie_path = Path(cfg["cookie_file"])
-    cookie_path.parent.mkdir(parents=True, exist_ok=True)
-    cookie_path.write_text(cookie.strip(), encoding="utf-8")
+def write_cookie(cfg, cookie: str, platform: str = "cn", append: bool = False):
+    platform_key = str(platform or "cn").strip().lower()
+    if platform_key not in {"cn", "global"}:
+        raise ValueError("platform 仅支持 cn 或 global")
+    store = load_cookie_store(cfg)
+    value = str(cookie or "").strip()
+    if append:
+        current = store.get(platform_key) if isinstance(store.get(platform_key), list) else []
+        values = [x for x in current if str(x or "").strip()]
+        if value:
+            values.append(value)
+        store[platform_key] = list(dict.fromkeys(values))
+    else:
+        store[platform_key] = [value] if value else []
+    save_cookie_store(cfg, store)
     logger.info("Cookie 更新")
     # 额外记录更新时间
     with (Path(cfg["logs_dir"]) / "cookie.log").open("a", encoding="utf-8") as f:
-        f.write(f"{datetime.now().isoformat()}\tupdate\n")
+        f.write(f"{datetime.now().isoformat()}\tupdate\t{platform_key}\n")
 
 
 def get_telegram_runtime_cfg() -> dict:
@@ -949,8 +1094,10 @@ def get_telegram_runtime_cfg() -> dict:
 
 
 def tg_cookie_status_text() -> str:
-    cookie = read_cookie(CFG)
-    if not cookie:
+    store = load_cookie_store(CFG)
+    cn_count = len(store.get("cn") or [])
+    global_count = len(store.get("global") or [])
+    if cn_count <= 0 and global_count <= 0:
         return "🍪 Cookie 状态：未设置\n🕒 更新时间：-"
     cookie_path = Path(CFG["cookie_file"])
     updated = (
@@ -958,7 +1105,12 @@ def tg_cookie_status_text() -> str:
         if cookie_path.exists()
         else "-"
     )
-    return f"🍪 Cookie 状态：✅ 已设置\n🕒 更新时间：{updated}"
+    return (
+        "🍪 Cookie 状态：✅ 已设置\n"
+        f"🇨🇳 国内 Cookie：{cn_count}\n"
+        f"🌍 国际 Cookie：{global_count}\n"
+        f"🕒 更新时间：{updated}"
+    )
 
 
 def tg_archive_count_text() -> str:
@@ -1506,6 +1658,7 @@ app.add_middleware(
 )
 
 CFG = load_config()
+ensure_runtime_support_files(CFG)
 ensure_manual_counter_file(CFG)
 
 TMP_DIR.mkdir(parents=True, exist_ok=True)
@@ -1594,9 +1747,16 @@ def _tg_archive_callback(url: str) -> dict:
 TG_SERVICE.set_archive_handler(_tg_archive_callback)
 
 
+def sync_telegram_service_state():
+    if TG_SERVICE.should_run():
+        TG_SERVICE.start()
+    else:
+        TG_SERVICE.stop()
+
+
 @app.on_event("startup")
 async def startup_events():
-    TG_SERVICE.start()
+    sync_telegram_service_state()
 
 
 @app.on_event("shutdown")
@@ -1627,11 +1787,16 @@ async def api_config():
     cfg = load_config()
     cookie_path = Path(cfg["cookie_file"])
     cookie_time = cookie_path.stat().st_mtime if cookie_path.exists() else None
+    cookie_store = load_cookie_store(cfg)
     tg = get_telegram_runtime_cfg()
     return {
         "download_dir": cfg["download_dir"],
         "logs_dir": cfg["logs_dir"],
         "cookie_file": cfg["cookie_file"],
+        "cookie_counts": {
+            "cn": len(cookie_store.get("cn") or []),
+            "global": len(cookie_store.get("global") or []),
+        },
         "manual_local_model_counter": read_manual_counter(cfg),
         "cookie_updated_at": datetime.fromtimestamp(cookie_time).isoformat() if cookie_time else None,
         "notify": {
@@ -1669,6 +1834,7 @@ async def api_save_notify_config(body: dict):
 
     # 持久化后刷新运行时配置
     CFG.update(build_runtime_config(raw_cfg))
+    sync_telegram_service_state()
     return {"status": "ok", "telegram": get_telegram_runtime_cfg()}
 
 
@@ -1682,11 +1848,38 @@ async def api_notify_test():
 
 @app.post("/api/cookie")
 async def api_cookie(body: dict):
-    cookie = (body or {}).get("cookie", "")
-    if not cookie.strip():
-        raise HTTPException(400, "cookie 不能为空")
-    write_cookie(CFG, cookie)
-    return {"status": "ok", "updated_at": datetime.now().isoformat()}
+    payload = body or {}
+    platform = str(payload.get("platform") or "cn").strip().lower()
+    append = bool(payload.get("append", False))
+    cookies = payload.get("cookies")
+
+    if isinstance(cookies, list):
+        cleaned = [str(x or "").strip() for x in cookies if str(x or "").strip()]
+        if not cleaned:
+            raise HTTPException(400, "cookies 不能为空")
+        store = load_cookie_store(CFG)
+        if platform not in {"cn", "global"}:
+            raise HTTPException(400, "platform 仅支持 cn 或 global")
+        if append:
+            current = store.get(platform) if isinstance(store.get(platform), list) else []
+            store[platform] = list(dict.fromkeys([*current, *cleaned]))
+        else:
+            store[platform] = cleaned
+        save_cookie_store(CFG, store)
+    else:
+        cookie = str(payload.get("cookie") or "").strip()
+        if not cookie:
+            raise HTTPException(400, "cookie 不能为空")
+        try:
+            write_cookie(CFG, cookie, platform=platform, append=append)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    return {
+        "status": "ok",
+        "updated_at": datetime.now().isoformat(),
+        "cookie_file": CFG["cookie_file"],
+        "cookie_store": load_cookie_store(CFG),
+    }
 
 
 @app.post("/api/archive")

@@ -53,6 +53,7 @@ data*/
 cookie.txt
 !config.json
 app/config.json
+app/config/*.json
 
 
 # Temporary files

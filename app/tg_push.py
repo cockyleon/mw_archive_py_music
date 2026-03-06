@@ -60,22 +60,35 @@ class TelegramPushService:
         self._thread: Optional[threading.Thread] = None
         self._commands_token = ""
 
+    def should_run(self) -> bool:
+        cfg = self._cfg_getter()
+        if not cfg.get("enable_push"):
+            return False
+        token = str(cfg.get("bot_token") or "").strip()
+        return bool(token)
+
     def start(self):
+        if not self.should_run():
+            return False
         if self._thread and self._thread.is_alive():
-            return
+            return True
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._poll_loop, name="tg-poll", daemon=True)
         self._thread.start()
         self._logger.info("Telegram 命令轮询线程已启动")
+        return True
 
     def set_archive_handler(self, handler: Callable[[str], Dict]):
         self._on_archive_url = handler
 
     def stop(self):
+        was_alive = bool(self._thread and self._thread.is_alive())
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=3)
-        self._logger.info("Telegram 命令轮询线程已停止")
+        self._thread = None
+        if was_alive:
+            self._logger.info("Telegram 命令轮询线程已停止")
 
     def notify_success(self, payload: Dict):
         cfg = self._cfg_getter()
