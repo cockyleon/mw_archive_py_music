@@ -146,7 +146,7 @@ class TelegramPushService:
         if not chat_ids:
             return {"status": "error", "message": "默认 Chat ID 未配置"}
 
-        text = "✅ Telegram 连接测试成功\n已收到来自 MakerWorld 归档控制台的测试消息。"
+        text = "✅ Telegram 连接测试成功\n已收到来自 本地模型库控制台 的测试消息。"
         success = 0
         failed = []
         for chat_id in chat_ids:

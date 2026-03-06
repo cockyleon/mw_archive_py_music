@@ -227,12 +227,6 @@ docker-compose up -d
 }
 ```
 
-说明：
-- `cn` 用于 `makerworld.com.cn`
-- `global` 用于 `makerworld.com`
-- 当前 README 只强调“支持国内 / 国际平台分组配置”
-- 多 Cookie 轮询能力由内部版本开关控制，默认关闭
-
 ### 完整 Cookie 获取
 随便打开一个模型，按 `F12`，选择 `Network`，然后刷新页面，找到请求，复制完整 `Cookie`。
 
@@ -249,7 +243,7 @@ docker-compose up -d
 
 ## 常用流程
 1. 在 `/config` 设置国内 / 国际平台 Cookie 与通知配置。
-2. 在 `/config` 输入模型链接执行归档，或通过 Telegram 发送模型链接触发归档。
+2. 在 `配置/模型归档` 页面输入模型链接执行归档，或通过 Telegram 发送模型链接触发归档。
 3. 若同模型再次归档，系统自动执行更新。
 4. 归档历史样式升级时，点击“其他功能”中的“一键更新历史归档”。
 5. 在 `/` 模型库查看、筛选、标记和打开本地模型页面。
@@ -270,13 +264,6 @@ Chrome 插件：
 - 文件：`plugin/tampermonkey/mw_quick_archive.user.js`
 - 说明：[plugin/tampermonkey/使用说明.md](plugin/tampermonkey/使用说明.md)
 - 直接安装插件地址 [地址](https://github.com/sonicmingit/mw_archive_py/raw/refs/heads/main/plugin/tampermonkey/mw_quick_archive.user.js)
-
-## 脚本说明
-- `update.sh`：更新与部署编排脚本，支持 `git pull` 无更新时确认是否继续重部署。详细用法与“快速本地构建更新”配置见 [doc/readme/update_sh_usage.md](doc/readme/update_sh_usage.md)。
-- `app/version.yml`：统一版本源（项目、油猴、Chrome 扩展版本）。
-- `scripts/sync_version.py`：将 `app/version.yml` 的版本同步到项目文件。
-- `scripts/release_tag.ps1`：一键执行“版本同步 -> commit -> 打 tag -> push”；推送 `v*` tag 后会由 GitHub Actions 自动创建 Release。
-- `scripts/rebuild_index_from_meta.py`：根据 `meta.json` 重建归档页面（兼容场景）。
 
 ## 文档目录
 - [api.md (API 接口文档)](doc/readme/api.md)
