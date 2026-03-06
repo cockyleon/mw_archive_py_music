@@ -12,9 +12,9 @@ COPY app/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ .
 
-# 准备默认数据/日志/配置目录（可通过挂载覆盖）
-RUN mkdir -p /app/data /app/logs /app/config
+# 准备默认数据/日志/配置/监控目录（可通过挂载覆盖）
+RUN mkdir -p /app/data /app/logs /app/config /app/watch
 
 EXPOSE 8000
-VOLUME ["/app/data", "/app/logs", "/app/config"]
+VOLUME ["/app/data", "/app/logs", "/app/config", "/app/watch"]
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
